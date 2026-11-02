@@ -1,0 +1,3214 @@
+{
+  "schemaVersion": 2,
+  "localDate": "2026-11-02",
+  "timezone": "America/New_York",
+  "configuration": "Release, framework-dependent net10.0 Windows validation publish",
+  "sdk": "10.0.403 (global.json latestPatch)",
+  "fixtureLinesPerFile": 250,
+  "method": "One synthetic stdio run per storage/scope; local scheduling noise and overlapping validation may affect latency. Not a statistical benchmark or token estimate.",
+  "realUncMeasurement": "User-authorized existing UNC test root. Only the exact supplied root was inspected and dedicated synthetic run subdirectories used; no parent or sibling enumeration.",
+  "runs": [
+    {
+      "storageKind": "local",
+      "physicalFiles": 1,
+      "rawReport": "../artifacts/measurements/mcp-headless-1files-20261102-125741-373/measurement.json",
+      "measuredAtUtc": "2026-11-02T12:57:42.8705519Z",
+      "sourceInfrastructureSha256": "8AF10D4ADE69C34F9C88812FD8ECAA61A706EE4634ACD88B849FF9999F95DDAB",
+      "sourceExecutableSha256": "03B5C618925EA8B048DD45091A9FD6ACBA1501FB646CA06A7D5A34EA4A7668CD",
+      "schemaValidationPerformed": true,
+      "exactStableCount": 1,
+      "peakQueryUncOperations": 0,
+      "maximumMonitorWorkingSetBytes": 77000704,
+      "maximumMonitorPrivateBytes": 34828288,
+      "shutdownMilliseconds": 13.54,
+      "exitCode": 0,
+      "stderrWasEmpty": true,
+      "cancellation": {
+        "WorkAdmissionVerified": false,
+        "DrainEvidence": "Clean stdin shutdown below; gated cancellation/rollback is validated by deterministic backend tests.",
+        "CancelIssuedAtMilliseconds": 1.92,
+        "ProbeResponseAtMilliseconds": 4.39,
+        "LatencyAfterCancelMilliseconds": 2.47
+      },
+      "assertions": {
+        "physicalFiles": 1,
+        "duplicateRoutesDeduplicated": true,
+        "replayVerified": true,
+        "hotQuietVerified": null,
+        "frozenExtentAndTerminalDriftVerified": true,
+        "explicitHandoffVerified": true,
+        "sourcePages": 2
+      },
+      "scenarios": [
+        {
+          "scenario": "initialize",
+          "polls": 1,
+          "milliseconds": 18.56,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 4998,
+          "structuredResponseBytes": 2007,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            1
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "idle",
+          "polls": 1,
+          "milliseconds": 5.77,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 4999,
+          "structuredResponseBytes": 2002,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "nonmatching_append",
+          "polls": 1,
+          "milliseconds": 7.95,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 5003,
+          "structuredResponseBytes": 2004,
+          "bytesEvaluated": 14,
+          "examinedLines": 1,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "idle_after_nonmatch",
+          "polls": 1,
+          "milliseconds": 2.2,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 4988,
+          "structuredResponseBytes": 2002,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "matching_append",
+          "polls": 1,
+          "milliseconds": 13.12,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 5231,
+          "structuredResponseBytes": 2088,
+          "bytesEvaluated": 17,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "replay",
+          "polls": 1,
+          "milliseconds": 1.79,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 5231,
+          "structuredResponseBytes": 2088,
+          "bytesEvaluated": 17,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "release",
+          "polls": 1,
+          "milliseconds": 1.48,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1772,
+          "structuredResponseBytes": 674,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "explicit_handoff",
+          "polls": 1,
+          "milliseconds": 2.98,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 3724,
+          "structuredResponseBytes": 1479,
+          "bytesEvaluated": 35,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "handoff_release",
+          "polls": 1,
+          "milliseconds": 1.5,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1772,
+          "structuredResponseBytes": 674,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        }
+      ],
+      "legacyMeasurements": [
+        {
+          "name": "search_logs_cold",
+          "milliseconds": 66.45,
+          "protocolResponseBytes": 3729,
+          "structuredResponseBytes": 1483,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 1,
+            "searchedFileCount": 1,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 1,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 1,
+            "matchOccurrenceCount": 1,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 10757,
+              "elapsedMilliseconds": 28,
+              "filesStarted": 1,
+              "filesCompleted": 1,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "search_logs_warm",
+          "milliseconds": 4.6,
+          "protocolResponseBytes": 3727,
+          "structuredResponseBytes": 1482,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 1,
+            "searchedFileCount": 1,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 1,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 1,
+            "matchOccurrenceCount": 1,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 10757,
+              "elapsedMilliseconds": 2,
+              "filesStarted": 1,
+              "filesCompleted": 1,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "count_logs_cold",
+          "milliseconds": 13.17,
+          "protocolResponseBytes": 3959,
+          "structuredResponseBytes": 1568,
+          "search": null,
+          "count": {
+            "selectedFileCount": 1,
+            "searchedFileCount": 1,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 1,
+            "matchingLineCount": 1,
+            "matchOccurrenceCount": 1,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 1,
+            "returnedFileRecordCount": 1,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 10757,
+              "elapsedMilliseconds": 2,
+              "filesStarted": 1,
+              "filesCompleted": 1,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "count_logs_warm",
+          "milliseconds": 2.96,
+          "protocolResponseBytes": 3959,
+          "structuredResponseBytes": 1568,
+          "search": null,
+          "count": {
+            "selectedFileCount": 1,
+            "searchedFileCount": 1,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 1,
+            "matchingLineCount": 1,
+            "matchOccurrenceCount": 1,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 1,
+            "returnedFileRecordCount": 1,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 10757,
+              "elapsedMilliseconds": 0,
+              "filesStarted": 1,
+              "filesCompleted": 1,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "read_log_tail_initial",
+          "milliseconds": 14.55,
+          "protocolResponseBytes": 6949,
+          "structuredResponseBytes": 2843,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 20,
+            "matchedLineRate": null,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_initial",
+          "milliseconds": 10.11,
+          "protocolResponseBytes": 3109,
+          "structuredResponseBytes": 1288,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.05,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 20,
+            "skippedLineCount": 19,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_idle",
+          "milliseconds": 3.8,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_idle",
+          "milliseconds": 2.07,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_no_match_append",
+          "milliseconds": 2.45,
+          "protocolResponseBytes": 1649,
+          "structuredResponseBytes": 693,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": 0.0,
+            "isIdle": false,
+            "fileIncluded": false,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 1,
+            "skippedLineCount": 1,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_append",
+          "milliseconds": 2.5,
+          "protocolResponseBytes": 3013,
+          "structuredResponseBytes": 1240,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.3333,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 3,
+            "skippedLineCount": 2,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        }
+      ]
+    },
+    {
+      "storageKind": "local",
+      "physicalFiles": 10,
+      "rawReport": "../artifacts/measurements/mcp-headless-10files-20261102-125743-620/measurement.json",
+      "measuredAtUtc": "2026-11-02T12:57:45.4164006Z",
+      "sourceInfrastructureSha256": "8AF10D4ADE69C34F9C88812FD8ECAA61A706EE4634ACD88B849FF9999F95DDAB",
+      "sourceExecutableSha256": "03B5C618925EA8B048DD45091A9FD6ACBA1501FB646CA06A7D5A34EA4A7668CD",
+      "schemaValidationPerformed": true,
+      "exactStableCount": 10,
+      "peakQueryUncOperations": 0,
+      "maximumMonitorWorkingSetBytes": 84426752,
+      "maximumMonitorPrivateBytes": 43671552,
+      "shutdownMilliseconds": 13.56,
+      "exitCode": 0,
+      "stderrWasEmpty": true,
+      "cancellation": {
+        "WorkAdmissionVerified": false,
+        "DrainEvidence": "Clean stdin shutdown below; gated cancellation/rollback is validated by deterministic backend tests.",
+        "CancelIssuedAtMilliseconds": 1.98,
+        "ProbeResponseAtMilliseconds": 4.47,
+        "LatencyAfterCancelMilliseconds": 2.49
+      },
+      "assertions": {
+        "physicalFiles": 10,
+        "duplicateRoutesDeduplicated": true,
+        "replayVerified": true,
+        "hotQuietVerified": true,
+        "frozenExtentAndTerminalDriftVerified": true,
+        "explicitHandoffVerified": true,
+        "sourcePages": 2
+      },
+      "scenarios": [
+        {
+          "scenario": "initialize",
+          "polls": 1,
+          "milliseconds": 25.24,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 10593,
+          "structuredResponseBytes": 4214,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            10
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "idle",
+          "polls": 1,
+          "milliseconds": 9.43,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 10572,
+          "structuredResponseBytes": 4209,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "nonmatching_append",
+          "polls": 1,
+          "milliseconds": 47.18,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 10615,
+          "structuredResponseBytes": 4214,
+          "bytesEvaluated": 140,
+          "examinedLines": 10,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "idle_after_nonmatch",
+          "polls": 1,
+          "milliseconds": 6.16,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 10594,
+          "structuredResponseBytes": 4209,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "matching_append",
+          "polls": 1,
+          "milliseconds": 47.41,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 12873,
+          "structuredResponseBytes": 5054,
+          "bytesEvaluated": 170,
+          "examinedLines": 10,
+          "eventCount": 10,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "replay",
+          "polls": 1,
+          "milliseconds": 3.02,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 12873,
+          "structuredResponseBytes": 5054,
+          "bytesEvaluated": 170,
+          "examinedLines": 10,
+          "eventCount": 10,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "hot_quiet_first_round",
+          "polls": 1,
+          "milliseconds": 15.07,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 10839,
+          "structuredResponseBytes": 4307,
+          "bytesEvaluated": 262165,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            1
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "hot_file_drain",
+          "polls": 2,
+          "milliseconds": 13.72,
+          "checkedFiles": 20,
+          "protocolResponseBytes": 21183,
+          "structuredResponseBytes": 8432,
+          "bytesEvaluated": 337857,
+          "examinedLines": 1,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0,
+            0
+          ],
+          "backlogFilesByPoll": [
+            1,
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "release",
+          "polls": 1,
+          "milliseconds": 1.86,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1774,
+          "structuredResponseBytes": 675,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "explicit_handoff",
+          "polls": 1,
+          "milliseconds": 3.21,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 3715,
+          "structuredResponseBytes": 1480,
+          "bytesEvaluated": 35,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "handoff_release",
+          "polls": 1,
+          "milliseconds": 1.33,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1772,
+          "structuredResponseBytes": 674,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        }
+      ],
+      "legacyMeasurements": [
+        {
+          "name": "search_logs_cold",
+          "milliseconds": 112.41,
+          "protocolResponseBytes": 8323,
+          "structuredResponseBytes": 3330,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 10,
+            "searchedFileCount": 10,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 10,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 10,
+            "matchOccurrenceCount": 10,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 107570,
+              "elapsedMilliseconds": 74,
+              "filesStarted": 10,
+              "filesCompleted": 10,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 2,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "search_logs_warm",
+          "milliseconds": 38.51,
+          "protocolResponseBytes": 8323,
+          "structuredResponseBytes": 3330,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 10,
+            "searchedFileCount": 10,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 10,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 10,
+            "matchOccurrenceCount": 10,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 107570,
+              "elapsedMilliseconds": 35,
+              "filesStarted": 10,
+              "filesCompleted": 10,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 2,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "count_logs_cold",
+          "milliseconds": 20.44,
+          "protocolResponseBytes": 9705,
+          "structuredResponseBytes": 3856,
+          "search": null,
+          "count": {
+            "selectedFileCount": 10,
+            "searchedFileCount": 10,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 10,
+            "matchingLineCount": 10,
+            "matchOccurrenceCount": 10,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 10,
+            "returnedFileRecordCount": 10,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 107570,
+              "elapsedMilliseconds": 8,
+              "filesStarted": 10,
+              "filesCompleted": 10,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 2,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "count_logs_warm",
+          "milliseconds": 10.67,
+          "protocolResponseBytes": 9705,
+          "structuredResponseBytes": 3856,
+          "search": null,
+          "count": {
+            "selectedFileCount": 10,
+            "searchedFileCount": 10,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 10,
+            "matchingLineCount": 10,
+            "matchOccurrenceCount": 10,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 10,
+            "returnedFileRecordCount": 10,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 107570,
+              "elapsedMilliseconds": 7,
+              "filesStarted": 10,
+              "filesCompleted": 10,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 2,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "read_log_tail_initial",
+          "milliseconds": 14.22,
+          "protocolResponseBytes": 6949,
+          "structuredResponseBytes": 2843,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 20,
+            "matchedLineRate": null,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_initial",
+          "milliseconds": 9.16,
+          "protocolResponseBytes": 3109,
+          "structuredResponseBytes": 1288,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.05,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 20,
+            "skippedLineCount": 19,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_idle",
+          "milliseconds": 3.96,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_idle",
+          "milliseconds": 2.1,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_no_match_append",
+          "milliseconds": 2.26,
+          "protocolResponseBytes": 1649,
+          "structuredResponseBytes": 693,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": 0.0,
+            "isIdle": false,
+            "fileIncluded": false,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 1,
+            "skippedLineCount": 1,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_append",
+          "milliseconds": 2.22,
+          "protocolResponseBytes": 3013,
+          "structuredResponseBytes": 1240,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.3333,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 3,
+            "skippedLineCount": 2,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        }
+      ]
+    },
+    {
+      "storageKind": "local",
+      "physicalFiles": 100,
+      "rawReport": "../artifacts/measurements/mcp-headless-100files-20261102-125746-063/measurement.json",
+      "measuredAtUtc": "2026-11-02T12:57:50.3733605Z",
+      "sourceInfrastructureSha256": "8AF10D4ADE69C34F9C88812FD8ECAA61A706EE4634ACD88B849FF9999F95DDAB",
+      "sourceExecutableSha256": "03B5C618925EA8B048DD45091A9FD6ACBA1501FB646CA06A7D5A34EA4A7668CD",
+      "schemaValidationPerformed": true,
+      "exactStableCount": 100,
+      "peakQueryUncOperations": 0,
+      "maximumMonitorWorkingSetBytes": 103796736,
+      "maximumMonitorPrivateBytes": 58818560,
+      "shutdownMilliseconds": 13.73,
+      "exitCode": 0,
+      "stderrWasEmpty": true,
+      "cancellation": {
+        "WorkAdmissionVerified": false,
+        "DrainEvidence": "Clean stdin shutdown below; gated cancellation/rollback is validated by deterministic backend tests.",
+        "CancelIssuedAtMilliseconds": 1.53,
+        "ProbeResponseAtMilliseconds": 3.52,
+        "LatencyAfterCancelMilliseconds": 2.0
+      },
+      "assertions": {
+        "physicalFiles": 100,
+        "duplicateRoutesDeduplicated": true,
+        "replayVerified": true,
+        "hotQuietVerified": true,
+        "frozenExtentAndTerminalDriftVerified": true,
+        "explicitHandoffVerified": true,
+        "sourcePages": 2
+      },
+      "scenarios": [
+        {
+          "scenario": "initialize",
+          "polls": 1,
+          "milliseconds": 93.24,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 66386,
+          "structuredResponseBytes": 26266,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            100
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "idle",
+          "polls": 10,
+          "milliseconds": 76.05,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 96112,
+          "structuredResponseBytes": 38131,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "nonmatching_append",
+          "polls": 10,
+          "milliseconds": 463.86,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 96216,
+          "structuredResponseBytes": 38172,
+          "bytesEvaluated": 1400,
+          "examinedLines": 100,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "idle_after_nonmatch",
+          "polls": 10,
+          "milliseconds": 64.6,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 96057,
+          "structuredResponseBytes": 38131,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "matching_append",
+          "polls": 10,
+          "milliseconds": 460.48,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 119141,
+          "structuredResponseBytes": 46662,
+          "bytesEvaluated": 1790,
+          "examinedLines": 100,
+          "eventCount": 100,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "replay",
+          "polls": 1,
+          "milliseconds": 2.7,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 12870,
+          "structuredResponseBytes": 5058,
+          "bytesEvaluated": 170,
+          "examinedLines": 10,
+          "eventCount": 10,
+          "uncheckedFilesByPoll": [
+            90
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "hot_quiet_first_round",
+          "polls": 10,
+          "milliseconds": 68.06,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 96304,
+          "structuredResponseBytes": 38230,
+          "bytesEvaluated": 262165,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "hot_file_drain",
+          "polls": 20,
+          "milliseconds": 119.49,
+          "checkedFiles": 200,
+          "protocolResponseBytes": 192142,
+          "structuredResponseBytes": 76276,
+          "bytesEvaluated": 337857,
+          "examinedLines": 1,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0,
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "release",
+          "polls": 1,
+          "milliseconds": 1.46,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1776,
+          "structuredResponseBytes": 676,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "explicit_handoff",
+          "polls": 1,
+          "milliseconds": 2.74,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 3704,
+          "structuredResponseBytes": 1480,
+          "bytesEvaluated": 35,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "handoff_release",
+          "polls": 1,
+          "milliseconds": 1.35,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1772,
+          "structuredResponseBytes": 674,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        }
+      ],
+      "legacyMeasurements": [
+        {
+          "name": "search_logs_cold",
+          "milliseconds": 604.46,
+          "protocolResponseBytes": 54067,
+          "structuredResponseBytes": 21702,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 100,
+            "searchedFileCount": 100,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 100,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 100,
+            "matchOccurrenceCount": 100,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 1075700,
+              "elapsedMilliseconds": 559,
+              "filesStarted": 100,
+              "filesCompleted": 100,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 2,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "search_logs_warm",
+          "milliseconds": 102.66,
+          "protocolResponseBytes": 54065,
+          "structuredResponseBytes": 21701,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 100,
+            "searchedFileCount": 100,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 100,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 100,
+            "matchOccurrenceCount": 100,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 1075700,
+              "elapsedMilliseconds": 94,
+              "filesStarted": 100,
+              "filesCompleted": 100,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 2,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "count_logs_cold",
+          "milliseconds": 108.17,
+          "protocolResponseBytes": 66969,
+          "structuredResponseBytes": 26638,
+          "search": null,
+          "count": {
+            "selectedFileCount": 100,
+            "searchedFileCount": 100,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 100,
+            "matchingLineCount": 100,
+            "matchOccurrenceCount": 100,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 100,
+            "returnedFileRecordCount": 100,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 1075700,
+              "elapsedMilliseconds": 86,
+              "filesStarted": 100,
+              "filesCompleted": 100,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 2,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "count_logs_warm",
+          "milliseconds": 102.61,
+          "protocolResponseBytes": 66969,
+          "structuredResponseBytes": 26638,
+          "search": null,
+          "count": {
+            "selectedFileCount": 100,
+            "searchedFileCount": 100,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 100,
+            "matchingLineCount": 100,
+            "matchOccurrenceCount": 100,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 100,
+            "returnedFileRecordCount": 100,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 1075700,
+              "elapsedMilliseconds": 95,
+              "filesStarted": 100,
+              "filesCompleted": 100,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 2,
+              "peakConcurrentUncOperations": 0
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "read_log_tail_initial",
+          "milliseconds": 14.66,
+          "protocolResponseBytes": 6949,
+          "structuredResponseBytes": 2843,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 20,
+            "matchedLineRate": null,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_initial",
+          "milliseconds": 9.81,
+          "protocolResponseBytes": 3109,
+          "structuredResponseBytes": 1288,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.05,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 20,
+            "skippedLineCount": 19,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_idle",
+          "milliseconds": 3.96,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_idle",
+          "milliseconds": 2.06,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_no_match_append",
+          "milliseconds": 2.29,
+          "protocolResponseBytes": 1649,
+          "structuredResponseBytes": 693,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": 0.0,
+            "isIdle": false,
+            "fileIncluded": false,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 1,
+            "skippedLineCount": 1,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_append",
+          "milliseconds": 2.37,
+          "protocolResponseBytes": 3013,
+          "structuredResponseBytes": 1240,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.3333,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 3,
+            "skippedLineCount": 2,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        }
+      ]
+    },
+    {
+      "storageKind": "unc",
+      "physicalFiles": 1,
+      "rawReport": "../artifacts/measurements/mcp-headless-1files-20261102-125651-218/measurement.json",
+      "measuredAtUtc": "2026-11-02T12:56:53.2157757Z",
+      "sourceInfrastructureSha256": "8AF10D4ADE69C34F9C88812FD8ECAA61A706EE4634ACD88B849FF9999F95DDAB",
+      "sourceExecutableSha256": "03B5C618925EA8B048DD45091A9FD6ACBA1501FB646CA06A7D5A34EA4A7668CD",
+      "schemaValidationPerformed": true,
+      "exactStableCount": 1,
+      "peakQueryUncOperations": 1,
+      "maximumMonitorWorkingSetBytes": 76636160,
+      "maximumMonitorPrivateBytes": 34603008,
+      "shutdownMilliseconds": 15.27,
+      "exitCode": 0,
+      "stderrWasEmpty": true,
+      "cancellation": {
+        "WorkAdmissionVerified": false,
+        "DrainEvidence": "Clean stdin shutdown below; gated cancellation/rollback is validated by deterministic backend tests.",
+        "CancelIssuedAtMilliseconds": 1.88,
+        "ProbeResponseAtMilliseconds": 3.33,
+        "LatencyAfterCancelMilliseconds": 1.45
+      },
+      "assertions": {
+        "physicalFiles": 1,
+        "duplicateRoutesDeduplicated": true,
+        "replayVerified": true,
+        "hotQuietVerified": null,
+        "frozenExtentAndTerminalDriftVerified": true,
+        "explicitHandoffVerified": true,
+        "sourcePages": 2
+      },
+      "scenarios": [
+        {
+          "scenario": "initialize",
+          "polls": 1,
+          "milliseconds": 26.12,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 4998,
+          "structuredResponseBytes": 2007,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            1
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "idle",
+          "polls": 1,
+          "milliseconds": 10.94,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 4988,
+          "structuredResponseBytes": 2002,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "nonmatching_append",
+          "polls": 1,
+          "milliseconds": 33.52,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 4992,
+          "structuredResponseBytes": 2004,
+          "bytesEvaluated": 14,
+          "examinedLines": 1,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "idle_after_nonmatch",
+          "polls": 1,
+          "milliseconds": 18.78,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 4999,
+          "structuredResponseBytes": 2002,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "matching_append",
+          "polls": 1,
+          "milliseconds": 33.91,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 5242,
+          "structuredResponseBytes": 2088,
+          "bytesEvaluated": 17,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "replay",
+          "polls": 1,
+          "milliseconds": 1.37,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 5242,
+          "structuredResponseBytes": 2088,
+          "bytesEvaluated": 17,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "release",
+          "polls": 1,
+          "milliseconds": 1.15,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1772,
+          "structuredResponseBytes": 674,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "explicit_handoff",
+          "polls": 1,
+          "milliseconds": 17.64,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 3702,
+          "structuredResponseBytes": 1479,
+          "bytesEvaluated": 35,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "handoff_release",
+          "polls": 1,
+          "milliseconds": 1.04,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1772,
+          "structuredResponseBytes": 674,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        }
+      ],
+      "legacyMeasurements": [
+        {
+          "name": "search_logs_cold",
+          "milliseconds": 83.28,
+          "protocolResponseBytes": 3729,
+          "structuredResponseBytes": 1483,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 1,
+            "searchedFileCount": 1,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 1,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 1,
+            "matchOccurrenceCount": 1,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 10757,
+              "elapsedMilliseconds": 45,
+              "filesStarted": 1,
+              "filesCompleted": 1,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "search_logs_warm",
+          "milliseconds": 10.11,
+          "protocolResponseBytes": 3727,
+          "structuredResponseBytes": 1482,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 1,
+            "searchedFileCount": 1,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 1,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 1,
+            "matchOccurrenceCount": 1,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 10757,
+              "elapsedMilliseconds": 7,
+              "filesStarted": 1,
+              "filesCompleted": 1,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "count_logs_cold",
+          "milliseconds": 18.13,
+          "protocolResponseBytes": 3959,
+          "structuredResponseBytes": 1568,
+          "search": null,
+          "count": {
+            "selectedFileCount": 1,
+            "searchedFileCount": 1,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 1,
+            "matchingLineCount": 1,
+            "matchOccurrenceCount": 1,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 1,
+            "returnedFileRecordCount": 1,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 10757,
+              "elapsedMilliseconds": 7,
+              "filesStarted": 1,
+              "filesCompleted": 1,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "count_logs_warm",
+          "milliseconds": 9.16,
+          "protocolResponseBytes": 3959,
+          "structuredResponseBytes": 1568,
+          "search": null,
+          "count": {
+            "selectedFileCount": 1,
+            "searchedFileCount": 1,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 1,
+            "matchingLineCount": 1,
+            "matchOccurrenceCount": 1,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 1,
+            "returnedFileRecordCount": 1,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 10757,
+              "elapsedMilliseconds": 7,
+              "filesStarted": 1,
+              "filesCompleted": 1,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "read_log_tail_initial",
+          "milliseconds": 20.57,
+          "protocolResponseBytes": 6949,
+          "structuredResponseBytes": 2843,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 20,
+            "matchedLineRate": null,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_initial",
+          "milliseconds": 17.54,
+          "protocolResponseBytes": 3109,
+          "structuredResponseBytes": 1288,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.05,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 20,
+            "skippedLineCount": 19,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_idle",
+          "milliseconds": 9.49,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_idle",
+          "milliseconds": 6.52,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_no_match_append",
+          "milliseconds": 9.05,
+          "protocolResponseBytes": 1649,
+          "structuredResponseBytes": 693,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": 0.0,
+            "isIdle": false,
+            "fileIncluded": false,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 1,
+            "skippedLineCount": 1,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_append",
+          "milliseconds": 8.77,
+          "protocolResponseBytes": 3013,
+          "structuredResponseBytes": 1240,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.3333,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 3,
+            "skippedLineCount": 2,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        }
+      ]
+    },
+    {
+      "storageKind": "unc",
+      "physicalFiles": 10,
+      "rawReport": "../artifacts/measurements/mcp-headless-10files-20261102-125730-609/measurement.json",
+      "measuredAtUtc": "2026-11-02T12:57:34.5528860Z",
+      "sourceInfrastructureSha256": "8AF10D4ADE69C34F9C88812FD8ECAA61A706EE4634ACD88B849FF9999F95DDAB",
+      "sourceExecutableSha256": "03B5C618925EA8B048DD45091A9FD6ACBA1501FB646CA06A7D5A34EA4A7668CD",
+      "schemaValidationPerformed": true,
+      "exactStableCount": 10,
+      "peakQueryUncOperations": 1,
+      "maximumMonitorWorkingSetBytes": 91074560,
+      "maximumMonitorPrivateBytes": 47095808,
+      "shutdownMilliseconds": 14.36,
+      "exitCode": 0,
+      "stderrWasEmpty": true,
+      "cancellation": {
+        "WorkAdmissionVerified": false,
+        "DrainEvidence": "Clean stdin shutdown below; gated cancellation/rollback is validated by deterministic backend tests.",
+        "CancelIssuedAtMilliseconds": 1.97,
+        "ProbeResponseAtMilliseconds": 3.33,
+        "LatencyAfterCancelMilliseconds": 1.36
+      },
+      "assertions": {
+        "physicalFiles": 10,
+        "duplicateRoutesDeduplicated": true,
+        "replayVerified": true,
+        "hotQuietVerified": true,
+        "frozenExtentAndTerminalDriftVerified": true,
+        "explicitHandoffVerified": true,
+        "sourcePages": 2
+      },
+      "scenarios": [
+        {
+          "scenario": "initialize",
+          "polls": 1,
+          "milliseconds": 93.21,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 10582,
+          "structuredResponseBytes": 4214,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            10
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "idle",
+          "polls": 1,
+          "milliseconds": 58.34,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 10594,
+          "structuredResponseBytes": 4209,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "nonmatching_append",
+          "polls": 1,
+          "milliseconds": 316.26,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 10582,
+          "structuredResponseBytes": 4214,
+          "bytesEvaluated": 140,
+          "examinedLines": 10,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "idle_after_nonmatch",
+          "polls": 1,
+          "milliseconds": 154.8,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 10583,
+          "structuredResponseBytes": 4209,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "matching_append",
+          "polls": 1,
+          "milliseconds": 325.29,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 12873,
+          "structuredResponseBytes": 5054,
+          "bytesEvaluated": 170,
+          "examinedLines": 10,
+          "eventCount": 10,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "replay",
+          "polls": 1,
+          "milliseconds": 2.64,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 12873,
+          "structuredResponseBytes": 5054,
+          "bytesEvaluated": 170,
+          "examinedLines": 10,
+          "eventCount": 10,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "hot_quiet_first_round",
+          "polls": 1,
+          "milliseconds": 166.72,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 10828,
+          "structuredResponseBytes": 4307,
+          "bytesEvaluated": 262165,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            1
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "hot_file_drain",
+          "polls": 2,
+          "milliseconds": 119.04,
+          "checkedFiles": 20,
+          "protocolResponseBytes": 21194,
+          "structuredResponseBytes": 8432,
+          "bytesEvaluated": 337857,
+          "examinedLines": 1,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0,
+            0
+          ],
+          "backlogFilesByPoll": [
+            1,
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "release",
+          "polls": 1,
+          "milliseconds": 1.24,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1774,
+          "structuredResponseBytes": 675,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "explicit_handoff",
+          "polls": 1,
+          "milliseconds": 8.55,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 3704,
+          "structuredResponseBytes": 1480,
+          "bytesEvaluated": 35,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "handoff_release",
+          "polls": 1,
+          "milliseconds": 1.31,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1772,
+          "structuredResponseBytes": 674,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        }
+      ],
+      "legacyMeasurements": [
+        {
+          "name": "search_logs_cold",
+          "milliseconds": 239.21,
+          "protocolResponseBytes": 8325,
+          "structuredResponseBytes": 3331,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 10,
+            "searchedFileCount": 10,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 10,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 10,
+            "matchOccurrenceCount": 10,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 107570,
+              "elapsedMilliseconds": 199,
+              "filesStarted": 10,
+              "filesCompleted": 10,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "search_logs_warm",
+          "milliseconds": 91.07,
+          "protocolResponseBytes": 8323,
+          "structuredResponseBytes": 3330,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 10,
+            "searchedFileCount": 10,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 10,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 10,
+            "matchOccurrenceCount": 10,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 107570,
+              "elapsedMilliseconds": 88,
+              "filesStarted": 10,
+              "filesCompleted": 10,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "count_logs_cold",
+          "milliseconds": 72.29,
+          "protocolResponseBytes": 9707,
+          "structuredResponseBytes": 3857,
+          "search": null,
+          "count": {
+            "selectedFileCount": 10,
+            "searchedFileCount": 10,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 10,
+            "matchingLineCount": 10,
+            "matchOccurrenceCount": 10,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 10,
+            "returnedFileRecordCount": 10,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 107570,
+              "elapsedMilliseconds": 60,
+              "filesStarted": 10,
+              "filesCompleted": 10,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "count_logs_warm",
+          "milliseconds": 59.63,
+          "protocolResponseBytes": 9707,
+          "structuredResponseBytes": 3857,
+          "search": null,
+          "count": {
+            "selectedFileCount": 10,
+            "searchedFileCount": 10,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 10,
+            "matchingLineCount": 10,
+            "matchOccurrenceCount": 10,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 10,
+            "returnedFileRecordCount": 10,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 107570,
+              "elapsedMilliseconds": 56,
+              "filesStarted": 10,
+              "filesCompleted": 10,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "read_log_tail_initial",
+          "milliseconds": 32.69,
+          "protocolResponseBytes": 6949,
+          "structuredResponseBytes": 2843,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 20,
+            "matchedLineRate": null,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_initial",
+          "milliseconds": 20.67,
+          "protocolResponseBytes": 3109,
+          "structuredResponseBytes": 1288,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.05,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 20,
+            "skippedLineCount": 19,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_idle",
+          "milliseconds": 9.05,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_idle",
+          "milliseconds": 7.58,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_no_match_append",
+          "milliseconds": 8.79,
+          "protocolResponseBytes": 1649,
+          "structuredResponseBytes": 693,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": 0.0,
+            "isIdle": false,
+            "fileIncluded": false,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 1,
+            "skippedLineCount": 1,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_append",
+          "milliseconds": 8.71,
+          "protocolResponseBytes": 3013,
+          "structuredResponseBytes": 1240,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.3333,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 3,
+            "skippedLineCount": 2,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        }
+      ]
+    },
+    {
+      "storageKind": "unc",
+      "physicalFiles": 100,
+      "rawReport": "../artifacts/measurements/mcp-headless-100files-20261102-125734-979/measurement.json",
+      "measuredAtUtc": "2026-11-02T12:57:55.1012835Z",
+      "sourceInfrastructureSha256": "8AF10D4ADE69C34F9C88812FD8ECAA61A706EE4634ACD88B849FF9999F95DDAB",
+      "sourceExecutableSha256": "03B5C618925EA8B048DD45091A9FD6ACBA1501FB646CA06A7D5A34EA4A7668CD",
+      "schemaValidationPerformed": true,
+      "exactStableCount": 100,
+      "peakQueryUncOperations": 1,
+      "maximumMonitorWorkingSetBytes": 109961216,
+      "maximumMonitorPrivateBytes": 58609664,
+      "shutdownMilliseconds": 15.61,
+      "exitCode": 0,
+      "stderrWasEmpty": true,
+      "cancellation": {
+        "WorkAdmissionVerified": false,
+        "DrainEvidence": "Clean stdin shutdown below; gated cancellation/rollback is validated by deterministic backend tests.",
+        "CancelIssuedAtMilliseconds": 1.54,
+        "ProbeResponseAtMilliseconds": 2.51,
+        "LatencyAfterCancelMilliseconds": 0.98
+      },
+      "assertions": {
+        "physicalFiles": 100,
+        "duplicateRoutesDeduplicated": true,
+        "replayVerified": true,
+        "hotQuietVerified": true,
+        "frozenExtentAndTerminalDriftVerified": true,
+        "explicitHandoffVerified": true,
+        "sourcePages": 2
+      },
+      "scenarios": [
+        {
+          "scenario": "initialize",
+          "polls": 1,
+          "milliseconds": 1628.18,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 66397,
+          "structuredResponseBytes": 26266,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            100
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "idle",
+          "polls": 10,
+          "milliseconds": 1051.31,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 96112,
+          "structuredResponseBytes": 38131,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "nonmatching_append",
+          "polls": 10,
+          "milliseconds": 1554.65,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 96128,
+          "structuredResponseBytes": 38172,
+          "bytesEvaluated": 1400,
+          "examinedLines": 100,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "idle_after_nonmatch",
+          "polls": 10,
+          "milliseconds": 562.17,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 96013,
+          "structuredResponseBytes": 38131,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": true,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "matching_append",
+          "polls": 10,
+          "milliseconds": 3132.8,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 119152,
+          "structuredResponseBytes": 46662,
+          "bytesEvaluated": 1790,
+          "examinedLines": 100,
+          "eventCount": 100,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "replay",
+          "polls": 1,
+          "milliseconds": 1.35,
+          "checkedFiles": 10,
+          "protocolResponseBytes": 12870,
+          "structuredResponseBytes": 5058,
+          "bytesEvaluated": 170,
+          "examinedLines": 10,
+          "eventCount": 10,
+          "uncheckedFilesByPoll": [
+            90
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "hot_quiet_first_round",
+          "polls": 10,
+          "milliseconds": 1596.83,
+          "checkedFiles": 100,
+          "protocolResponseBytes": 96370,
+          "structuredResponseBytes": 38230,
+          "bytesEvaluated": 262165,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "hot_file_drain",
+          "polls": 20,
+          "milliseconds": 1027.3,
+          "checkedFiles": 200,
+          "protocolResponseBytes": 192164,
+          "structuredResponseBytes": 76276,
+          "bytesEvaluated": 337857,
+          "examinedLines": 1,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0,
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+            10,
+            0
+          ],
+          "backlogFilesByPoll": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "release",
+          "polls": 1,
+          "milliseconds": 0.72,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1776,
+          "structuredResponseBytes": 676,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        },
+        {
+          "scenario": "explicit_handoff",
+          "polls": 1,
+          "milliseconds": 6.07,
+          "checkedFiles": 1,
+          "protocolResponseBytes": 3715,
+          "structuredResponseBytes": 1480,
+          "bytesEvaluated": 35,
+          "examinedLines": 1,
+          "eventCount": 1,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": true
+        },
+        {
+          "scenario": "handoff_release",
+          "polls": 1,
+          "milliseconds": 0.56,
+          "checkedFiles": 0,
+          "protocolResponseBytes": 1772,
+          "structuredResponseBytes": 674,
+          "bytesEvaluated": 0,
+          "examinedLines": 0,
+          "eventCount": 0,
+          "uncheckedFilesByPoll": [
+            0
+          ],
+          "backlogFilesByPoll": [
+            0
+          ],
+          "finalIsIdle": false,
+          "finalIsCaughtUp": false
+        }
+      ],
+      "legacyMeasurements": [
+        {
+          "name": "search_logs_cold",
+          "milliseconds": 1830.37,
+          "protocolResponseBytes": 54069,
+          "structuredResponseBytes": 21703,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 100,
+            "searchedFileCount": 100,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 100,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 100,
+            "matchOccurrenceCount": 100,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 1075700,
+              "elapsedMilliseconds": 1780,
+              "filesStarted": 100,
+              "filesCompleted": 100,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "search_logs_warm",
+          "milliseconds": 573.43,
+          "protocolResponseBytes": 54067,
+          "structuredResponseBytes": 21702,
+          "search": {
+            "resultMode": "countsOnly",
+            "selectedFileCount": 100,
+            "searchedFileCount": 100,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 100,
+            "pageOmittedZeroHitFileCount": 0,
+            "returnedHitCount": 0,
+            "queryReturnedHitCount": 0,
+            "maxQueryHits": 10000,
+            "isTraversalComplete": true,
+            "matchingLineCount": 100,
+            "matchOccurrenceCount": 100,
+            "isPageComplete": true,
+            "isQueryComplete": true,
+            "incompleteReasons": [],
+            "statistics": {
+              "bytesEvaluated": 1075700,
+              "elapsedMilliseconds": 566,
+              "filesStarted": 100,
+              "filesCompleted": 100,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "count": null,
+          "tail": null
+        },
+        {
+          "name": "count_logs_cold",
+          "milliseconds": 588.01,
+          "protocolResponseBytes": 66971,
+          "structuredResponseBytes": 26639,
+          "search": null,
+          "count": {
+            "selectedFileCount": 100,
+            "searchedFileCount": 100,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 100,
+            "matchingLineCount": 100,
+            "matchOccurrenceCount": 100,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 100,
+            "returnedFileRecordCount": 100,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 1075700,
+              "elapsedMilliseconds": 567,
+              "filesStarted": 100,
+              "filesCompleted": 100,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "count_logs_warm",
+          "milliseconds": 556.33,
+          "protocolResponseBytes": 66971,
+          "structuredResponseBytes": 26639,
+          "search": null,
+          "count": {
+            "selectedFileCount": 100,
+            "searchedFileCount": 100,
+            "skippedFileCount": 0,
+            "failedFileCount": 0,
+            "remainingFileCount": 0,
+            "matchedFileCount": 100,
+            "matchingLineCount": 100,
+            "matchOccurrenceCount": 100,
+            "isComplete": true,
+            "incompleteReasons": [],
+            "bucketSize": "none",
+            "bucketMode": "sparse",
+            "logicalBucketCount": 0,
+            "emittedBucketCount": 0,
+            "fileRecordTotalCount": 100,
+            "returnedFileRecordCount": 100,
+            "isFileRecordTruncated": false,
+            "statistics": {
+              "bytesEvaluated": 1075700,
+              "elapsedMilliseconds": 551,
+              "filesStarted": 100,
+              "filesCompleted": 100,
+              "filesSkipped": 0,
+              "peakConcurrentDiskOperations": 1,
+              "peakConcurrentUncOperations": 1
+            }
+          },
+          "tail": null
+        },
+        {
+          "name": "read_log_tail_initial",
+          "milliseconds": 19.42,
+          "protocolResponseBytes": 6949,
+          "structuredResponseBytes": 2843,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 20,
+            "matchedLineRate": null,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_initial",
+          "milliseconds": 16.39,
+          "protocolResponseBytes": 3109,
+          "structuredResponseBytes": 1288,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.05,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 20,
+            "skippedLineCount": 19,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_idle",
+          "milliseconds": 9.72,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_idle",
+          "milliseconds": 7.54,
+          "protocolResponseBytes": 645,
+          "structuredResponseBytes": 221,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": null,
+            "isIdle": true,
+            "fileIncluded": false,
+            "nextCursorIncluded": false,
+            "examinedLineCount": null,
+            "skippedLineCount": null,
+            "remainingLineCount": null,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_no_match_append",
+          "milliseconds": 7.31,
+          "protocolResponseBytes": 1649,
+          "structuredResponseBytes": 693,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 0,
+            "matchedLineRate": 0.0,
+            "isIdle": false,
+            "fileIncluded": false,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 1,
+            "skippedLineCount": 1,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        },
+        {
+          "name": "read_log_tail_filtered_append",
+          "milliseconds": 7.19,
+          "protocolResponseBytes": 3013,
+          "structuredResponseBytes": 1240,
+          "search": null,
+          "count": null,
+          "tail": {
+            "returnedLineCount": 1,
+            "matchedLineRate": 0.3333,
+            "isIdle": false,
+            "fileIncluded": true,
+            "nextCursorIncluded": true,
+            "examinedLineCount": 3,
+            "skippedLineCount": 2,
+            "remainingLineCount": 0,
+            "removedLineNumber": null
+          }
+        }
+      ]
+    }
+  ]
+}

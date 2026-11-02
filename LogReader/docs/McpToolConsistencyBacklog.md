@@ -1,6 +1,6 @@
 # MCP tool consistency scope and deferred work
 
-Planning note: 2026-11-01. These are scope decisions, not implemented behavior.
+Scope note: 2026-11-01; current pass completed 2026-11-02 with evidence in the execution plan. Deferred rolling-date items below remain unimplemented.
 
 Active work is defined in the [overview](McpToolConsistencyPlan.md) and the [execution plan](McpToolConsistencyExecutionPlan.md). This file preserves the deferred rolling-file-date scope.
 

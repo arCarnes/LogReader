@@ -1,6 +1,6 @@
 # MCP Mainline WeezTail Impact Analysis
 
-Last updated: 2026-08-29
+Last updated: 2026-11-02
 
 ## Conclusion
 
@@ -25,11 +25,13 @@ The processes can still contend for operating-system disk or network-share bandw
 
 - Official portable and MSI packages include both single-file, self-contained, `win-x64` executables beside one `WeezTail.install.json`.
 - The desktop app and sidecar share product version metadata and are released as one package.
-- Packaging drives `WeezTail.Mcp.exe` through redirected stdio and verifies initialize, the exact six-tool surface, `server_status`, `count_logs`, protocol-only stdout, clean stdin shutdown, and exit code zero.
+- Packaging drives `WeezTail.Mcp.exe` through redirected stdio and verifies initialize, the exact seven-tool surface, `server_status`, `count_logs`, `monitor_logs`, schema/content parity, protocol-only stdout, clean stdin shutdown, and exit code zero.
 - A running MCP client can hold only `WeezTail.Mcp.exe` open. Stop or restart active clients before repairing, upgrading, uninstalling, or replacing the portable package.
 - The Windows account launching the client must resolve WeezTail's selected storage and read the configured logs. Cross-account company-managed execution is deferred pending its eventual account model.
 
 Artifact sizes and repeatable active-request measurements are recorded in [MCP Performance and Mainline Measurements](./McpPerformanceMeasurements.md).
+
+Target-based monitoring remains caller-driven and headless: no WPF scheduling or shared UI indexes were introduced. Search/count preserve frozen per-file extents; explicit handoff copies only committed verified boundaries. Monitoring stays on one selected rolling date, uses fair bounded polls, and stops affected files on continuity changes. See [consistency measurements](McpToolConsistencyMeasurements.md) for the 1/10/100-file fixtures and actual validation limits.
 
 ## Resource bounds
 
@@ -40,6 +42,8 @@ Each MCP client owns a process with these independent limits:
 - 30-second warm retention and unchanged 30-second default/maximum request deadline;
 - 5-second normal search/count scan slice and 256 MiB scan-byte budget;
 - 2,000 configured candidates, 200 files per internal search/count work unit, 1,000 count buckets, 200 returned hits/file/page, 2,000 returned search hits/page, 10,000 emitted hits/text query across continuations, and 800,000 response content characters/page.
+
+Monitoring adds a 100-file scope cap, 10-file default polls, 4 MiB total/256 KiB per-file scan slices, a bounded trailing-line probe and shared process-owned continuation memory/expiry. Source handoff retention is opt-in; release frees observation checkpoints.
 
 Multiple clients multiply those bounded process resources. A shared daemon or cross-process index could reduce duplication, but would reintroduce discovery, authentication, lifecycle, cleanup, and concurrency complexity. It is not warranted until real multi-client measurements show the separate-process model is a product problem.
 

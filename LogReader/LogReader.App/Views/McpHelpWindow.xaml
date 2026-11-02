@@ -153,12 +153,20 @@
                         <TextBlock Text="Search" FontWeight="SemiBold"/>
                         <TextBlock TextWrapping="Wrap" Margin="16,1,0,6"
                                    Text="Search one selected file, all files in a dashboard, or every descendant under a folder."/>
+                        <TextBlock Text="Count" FontWeight="SemiBold"/>
+                        <TextBlock TextWrapping="Wrap" Margin="16,1,0,6"
+                                   Text="Count matching events across the same configured scope, with optional time windows and buckets."/>
+                        <TextBlock Text="Monitor changes" FontWeight="SemiBold"/>
+                        <TextBlock TextWrapping="Wrap" Margin="16,1,0,6"
+                                   Text="Only when requested, observe new matches across selected files through bounded polls. Monitoring keeps one selected file date and stops affected files when continuity changes."/>
                         <TextBlock Text="Read lines" FontWeight="SemiBold"/>
                         <TextBlock TextWrapping="Wrap" Margin="16,1,0,6"
                                    Text="Retrieve a small line range around a result when more context is needed."/>
                         <TextBlock Text="Read tail" FontWeight="SemiBold"/>
                         <TextBlock TextWrapping="Wrap" Margin="16,1,0,6"
                                    Text="Read or poll the end of one configured file with a short-lived cursor."/>
+                        <TextBlock TextWrapping="Wrap" Margin="0,2,0,8"
+                                   Text="Search and count finish their original bounded investigation. Incomplete evidence is reported with caveats; it does not automatically trigger another scan or monitoring."/>
                         <TextBlock Text="Check status" FontWeight="SemiBold"/>
                         <TextBlock TextWrapping="Wrap" Margin="16,1,0,0"
                                    Text="Report catalog readiness, effective limits, and this process's bounded cache usage."/>

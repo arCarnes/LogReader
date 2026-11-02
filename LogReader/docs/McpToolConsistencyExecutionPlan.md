@@ -3,21 +3,21 @@
 ## Document control
 
 - Created: 2026-11-01 (America/New_York).
-- Status: In progress. M1 contract characterization complete; implementation follows.
+- Status: Complete. All six milestones and seven outcomes implemented, validated and reviewed on 2026-11-02.
 - Branch: `codex/mcp-tool-consistency`; do not switch branches or overwrite unrelated work.
 - Planning baseline: `04f327f` (scope/backlog note), following `83106b2` on main. Recheck actual HEAD and working tree before implementation; documentation commits follow this baseline.
 - Human overview: [McpToolConsistencyPlan.md](McpToolConsistencyPlan.md).
 - Deferred scope: [McpToolConsistencyBacklog.md](McpToolConsistencyBacklog.md).
-- Authority: current user instructions and repository `AGENTS.md`. This document plans work; creating it does not execute runtime changes.
+- Authority: current user instructions and repository `AGENTS.md`. The execution request authorized implementation; archived plans remain historical evidence.
 - Keep Progress, Resume checkpoint, Decisions, Surprises, validation evidence, and Outcomes current. Do not mark work complete merely because code exists.
 
 ## Resume checkpoint
 
-- Current milestone: M6, final acceptance and delivery.
-- Next action: extend/run representative published multi-file measurements and end-to-end fixture, finish docs, run final solution/service-safe/interactive checks and security review.
-- Completed implementation: M1–M5; see milestone evidence and local commits.
-- Validation: M1 Core.Tests build and 2/2 characterization tests passed; see milestone evidence.
-- Active operations/blockers: none.
+- Current milestone: M6 complete; no required implementation or acceptance work remains.
+- Next action: none. Deferred rolling-date work requires a separate request; no push or release is authorized.
+- Completed implementation: M1–M6; see milestone evidence, outcome traceability and local commits below.
+- Validation: final Release solution build passed. Full service-safe solution: Core 920/920 and WPF/integration 1,496/1,496. All 31 monitor/lifecycle/handoff regressions passed three consecutive runs. Separate interactive desktop lane: 5/5 executed/pass, none skipped. Fresh artifact stdio smoke and all six local/real-UNC 1/10/100-file measurements passed.
+- Active operations: none. Validation processes exited; observation fixtures explicitly released. Relevant delivery changes are recorded in the final local delivery commit. Synthetic test artifacts remain ignored and UNC run folders are retained for inspection.
 - Local historical-plan cleanup is recorded separately in [PlanMaintenance2026-11-01.md](PlanMaintenance2026-11-01.md); archived instructions are historical evidence, not active work orders.
 
 ## Purpose and observable outcome
@@ -91,7 +91,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 - [x] M3 bounded multi-file monitoring.
 - [x] M4 lifecycle and explicit handoff.
 - [x] M5 public simplification and recovery.
-- [ ] M6 final acceptance and delivery.
+- [x] M6 final acceptance and delivery.
 
 ## M1 - Characterize current contracts and settle semantics
 
@@ -153,14 +153,17 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 
 ## M6 - Final validation, measurements, and documentation
 
-- State: Not started. Dependencies: M5.
+- State: Complete. Dependencies: M5.
 - Update server guide, getting-started material, security/architecture/performance documentation, in-app help where affected, artifact smoke, and measurement harness. Explain selected-date scope and snapshot versus observation boundaries in plain language.
 - Run end-to-end fixtures: discover scope; search enough evidence; count an exact stable fixture; continue bounded snapshot without including new appends in already-frozen extents; report terminal drift honestly; explicitly monitor a multi-file scope; hand off safely; stop/release observation.
 - Measure representative 1/10/100-file scopes and a supported-cap boundary, idle and active/no-match/matching polls, a hot-file/quiet-file mix, duplicate paths, local/controlled UNC contention, response bytes, actual files checked/backlog, latency, memory and cancellation/drain. Use explicit readiness signals. Real UNC measurements require an available share; report simulated versus real evidence separately.
 - Compare unchanged single-file behavior and legacy query modes; verify limits remain bounded. Report measured values, not assumed token savings or an atomic snapshot guarantee.
 - Review security-sensitive scope/cursor/path/network changes; verify no paths, credentials, labels-as-instructions, or log text leak into diagnostics. Keep stdout protocol-only.
 - Acceptance: all seven outcomes have traceable code/tests/docs and actual passing required checks; no cross-date expansion; no automatic rescans/monitoring; no running owned work or uncommitted relevant changes remain. Update Outcomes and record any externally blocked checks precisely rather than claiming completion.
-- Evidence: pending.
+- Evidence: final Release solution build passed with `-p:UseSharedCompilation=false`; full service-safe solution tests passed 2,416/2,416 (920 Core + 1,496 WPF/integration). All 31 monitor/lifecycle/handoff regressions passed three times after the final initial-missing-file fix. Separate interactive desktop lane executed/passed 5/5 with no skips. Final tool schema/recovery clarification passed 117 tests. Fresh sidecar artifact smoke passed all seven tools, schemas, structured/text parity, request failures, protocol-only stdout and clean stdin exit.
+- Measurements: six actual stdio runs (local and real UNC, each 1/10/100 files), exact stable counts, physical alias/provenance deduplication, idle/nonmatch/match rounds, replay, hot/quiet fairness, frozen-extent continuation with terminal drift, explicit handoff/release and clean process exit all passed. The final Infrastructure artifact hash is `8AF10D4ADE69C34F9C88812FD8ECAA61A706EE4634ACD88B849FF9999F95DDAB`. [Measurements](McpToolConsistencyMeasurements.md) and [JSON evidence](McpToolConsistencyMeasurements.json) record timings, memory, bytes, query comparisons, hashes and raw report locations. Actual UNC testing stayed within dedicated children of the supplied authorized root; no parent/sibling enumeration occurred.
+- Review: corrected alias-page cap admission (300 aliases / 100 physical files), append/half-UTF16 backlog, split CRLF, BOM-less UTF16, prefetched-hit handoff rejection and invalid date/filter handling. Missing initial files now explicitly stop without claiming a retained boundary or retryability; healthy files continue. Public docs, security notes and in-app help agree with the tested surface. No dependency/version changes, cross-date traversal, resolver consolidation, implicit fresh scans, hidden observation or UI service dependencies were introduced.
+- Validation limits: NuGet audit metadata was unreachable (`NU1900`), not a build/test failure. Transport cancellation probes explicitly do not prove heavy-work admission; gated backend tests prove rollback/drain. Filesystem deadlines remain cooperative and measurements are single synthetic runs, not percentile guarantees. There are no unavailable required validation lanes.
 
 ## Validation commands and reliability
 
@@ -174,6 +177,21 @@ dotnet test LogReader/LogReader.Tests/LogReader.Tests.csproj -c Release --no-bui
 dotnet build LogReader/LogReader.sln -c Release -m:1
 dotnet test LogReader/LogReader.sln -c Release --no-build --no-restore -m:1 --filter "Category!=InteractiveDesktop"
 ```
+
+Final acceptance commands used (all output stayed local; each build/publish finished before consuming its output):
+
+```powershell
+dotnet build LogReader/LogReader.sln -c Release -m:1 --no-restore -p:UseSharedCompilation=false
+dotnet test LogReader/LogReader.Core.Tests/LogReader.Core.Tests.csproj -c Release --no-build --no-restore --filter "FullyQualifiedName~Monitor_|FullyQualifiedName~MonitorLifecycle_|FullyQualifiedName~Handoff_"
+# Repeat the focused filter three times, then run the full service-safe solution.
+dotnet test LogReader/LogReader.sln -c Release --no-build --no-restore -m:1 --filter "Category!=InteractiveDesktop"
+pwsh -NoProfile -File .github/scripts/Invoke-InteractiveDesktopTests.ps1 -Configuration Release
+dotnet publish LogReader/LogReader.Mcp/LogReader.Mcp.csproj -c Release --no-restore -p:UseSharedCompilation=false -o LogReader/artifacts/mcp-consistency-smoke
+pwsh -NoProfile -File LogReader/packaging/scripts/Test-McpStdioArtifact.ps1 -ExecutablePath LogReader/artifacts/mcp-consistency-smoke/WeezTail.Mcp.exe
+pwsh -NoProfile -File LogReader/packaging/scripts/Measure-McpLogServer.ps1 -ExecutablePath LogReader/artifacts/mcp-consistency-smoke/WeezTail.Mcp.exe -FileCount 100 -LinesPerFile 250 -IncludeMonitorConsistency -IncludeStatistics
+```
+
+Measurements ran separately for `-FileCount 1`, `10` and `100`, then the same three cases with `-LogDirectoryRoot <authorized existing test root>` for real UNC. The raw report links in the JSON summary identify the exact six final runs; supplied network paths are omitted from committed evidence. Desktop TRX evidence remains in ignored `artifacts/test-results/interactive-desktop/a3b9e7db770a45339364648ca5910bd9/`.
 
 - Test new suites by their actual names too; the example filters above are not exhaustive future coverage. Run full affected-project suites before final solution checks.
 - Repeat focused concurrency cases at least three times using explicit readiness/gates, bounded waits, finally releases, thread-safe doubles, and draining before fixture disposal. Do not fix races by sleeping longer, weakening assertions, or disabling more parallelism.
@@ -200,8 +218,8 @@ See [McpToolConsistencyBacklog.md](McpToolConsistencyBacklog.md). Do not impleme
 2. Resolve/deduplicate configured targets once using the captured reference date. Retain physical paths privately. Every poll/replay rereads the catalog; any revision change rejects the cursor before disk work. No dated-path following or automatic reconciliation.
 3. Default initial position is start-now, with no historical text. Capture real file boundaries for the entire admitted scope before returning a cursor. Initialization is all-or-nothing under the request deadline; a failed initialization promises no observation. Bound admission to 100 physical files. Capture an unfinished trailing line using a bounded backward probe; reject an unsafe boundary rather than skip it. Events use generation plus byte offset identity (line numbers only where known), avoiding full-file indexes merely to establish start-now.
 4. Reuse continuation-store admission, serialization, transactional clone/commit and one-step replay. Bound files per poll (default 10), total lines/bytes/text and per-file bytes. Advance round-robin even on empty matches/errors. Retain checkpoints rather than full indexes. Existing process disk/UNC gates apply. Fifteen-minute idle expiry and configured session/memory capacities apply. Caller cancellation rolls back the whole poll.
-5. New monitoring stops an individual file on same-path generation, truncation or encoding change, with an attributable terminal event. Temporary unavailability retains its boundary and retries on subsequent bounded polls. This matches UI monitor-new-matches; legacy tail reset behavior remains unchanged. No implicit replacement history scan.
-6. Explicit `handoffCursor` comes from retained snapshot state, including clean terminal snapshots. Transfer only when every selected file has an initialized, exhausted, verified boundary and selection is exhausted. Reject partial/uncertain boundaries without fallback scans. Source state is copied, not consumed, for the same bounded lifetime. Handoff does not refresh the captured date/window. Retry the resulting monitor cursor for poll replay; an initial cursorless call is a new observation.
+5. New monitoring stops an individual file on same-path generation, truncation or encoding change, with an attributable terminal event. Temporary unavailability after a baseline retains its boundary and retries on subsequent bounded polls. An initial missing/unreadable file stops explicitly because no safe boundary exists. This matches UI monitor-new-matches; legacy tail reset behavior remains unchanged. No implicit replacement history scan.
+6. Explicit `handoffCursor` comes from retained snapshot state, including clean terminal snapshots. Transfer only when every selected file has an initialized, exhausted, verified boundary, all prefetched hits are committed and selection is exhausted. Verified append drift after the frozen extent is eligible; unvisited/failed/unsafe or query-cap-prefetched state is rejected without fallback scans. Source state is copied, not consumed, for the same bounded lifetime. Handoff does not refresh the captured date/window. Retry the resulting monitor cursor for poll replay; an initial cursorless call is a new observation.
 7. Shared text predicate supports inclusion plus optional exclusion using the same regex/case rules, or time-only queries. Search gains frozen relative windows; monitors freeze windows at creation rather than slide them. Missing/incompatible timestamps are excluded and counted separately. Context is surrounding source evidence, so may fail the hit predicate. Empty query without time criteria remains rejected for snapshot search/count; unfiltered explicit monitoring is valid.
 8. Keep existing result modes/defaults and schema versions; add fields/one tool. Prefer samples with optional context for evidence and count for totals. Preserve compact reconstruction and legacy tail cursors. Errors with no usable result set MCP isError; useful partial file results stay successful with structured errors. Discovery gains an optional expected revision. Recovery never silently starts a new investigation.
 
@@ -211,6 +229,9 @@ See [McpToolConsistencyBacklog.md](McpToolConsistencyBacklog.md). Do not impleme
 - 2026-11-01: all operations in this pass stay within one selected rolling-file date. Rolling resolver consolidation remains deferred as a whole.
 - 2026-11-01: search/count stay bounded as-of investigations; monitoring and handoff are explicit; terminal uncertainty does not authorize repeated fresh scans.
 - 2026-11-01: create and review plan documents now; execute runtime work only under the subsequent execution request.
+- 2026-11-02: physical admission cap is 100 files (unresolved entries consume slots); configured aliases merge across resolver pages within the existing 2,000-candidate ceiling. Reject an oversized scope before capturing baselines.
+- 2026-11-02: preserve actual BOM evidence and byte-offset event identities; bounded initialization commits only once every admitted file has a baseline or an explicit stopped error. Fixed time windows and selected-date binding survive handoff.
+- 2026-11-02: user supplied an authorized real UNC test root. Test only exact-root access and dedicated synthetic run descendants; preserve parent/sibling privacy. Separate actual network evidence from deterministic simulated contention.
 
 ## Surprises and discoveries
 
@@ -218,10 +239,43 @@ See [McpToolConsistencyBacklog.md](McpToolConsistencyBacklog.md). Do not impleme
 - SDK compiler-server startup was slow under restricted process access; UseSharedCompilation=false gives deterministic short builds. Vstest later failed before testhost connection; normal local process access passed the same tests, with no timeout increases.
 - Start-now uses generation/byte-offset identity rather than building line indexes for 100 files. Initialization returns only after all files are baselined or explicitly stopped; earlier-file appends during initialization are retained by their captured boundaries.
 
+- Final review corrected physical-cap admission across alias pages, pending observed-growth/UTF-16 backlog, split-CRLF state, BOM-less UTF-16 boundaries, committed-evidence handoff eligibility, and structured invalid-date/filter errors. New regressions exercise each.
+- A final WPF run exposed an unrelated dashboard test using Immediate dispatch while member refresh mutated UI collections. The focused correction runs its setup/assertions/cleanup on WpfTestHost and drains shutdown with existing fail-closed host lifetime; no production dashboard behavior changed. Its original mixed line endings are preserved; whitespace checking uses cr-at-eol explicitly for that mixed file.
+
 ## Outcomes and retrospective
 
-M1–M5 implemented and validated in coherent local commits. Shared predicates/time/coverage, bounded multi-file monitoring and explicit snapshot handoff are delivered. Public recovery/schema consolidation is delivered. Final measurement/documentation acceptance remains in M6; final completion is not yet claimed.
+All six milestones and seven outcomes are delivered. Search/count remain bounded as-of investigations; continuing them advances their original extents and frozen windows. Terminal uncertainty is reported without fresh scans. Monitoring requires explicit intent, stays on one selected rolling-file date and advances only through bounded caller polls. Existing tail modes, query modes and the headless/UI boundary remain compatible.
+
+| Outcome | Implementation evidence | Validation and documentation |
+| --- | --- | --- |
+| Multi-file monitoring | `HeadlessLogQueryBackend.Monitor.cs`, `LogMonitorContracts.cs`: configured targets, deduplicated paths/provenance, fair slices and one process-owned cursor | `McpMonitorTests`: alias pages, 101-file rejection, fair hot/quiet progress and controlled UNC gates; six measured local/UNC scopes; server guide |
+| Shared scope/filter/time semantics | `PreparedLineFilter.cs`, backend predicate/resumable preparation and `SearchRequest`: include/exclude, regex/case, fixed relative windows, timestamp coverage | `McpConsistencyPredicateTests`, exclusion-only monitor and frozen-time handoff cases; server guide and architecture |
+| Lifecycle and explicit handoff | backend monitor/resumable and `QueryContinuationStore`: start-now baseline, stopped changes, opt-in copied snapshot checkpoints, period/release | `McpMonitorLifecycleTests`: split CRLF, partial UTF16, truncation/replacement/encoding stop, safe/unsafe handoff, midnight selected-date binding; real stdio drift/handoff |
+| Understandable progress and uncertainty | checked/unchecked/backlog/stopped counts, scope rounds, independent timestamp evaluation, partial/uncertain snapshot facts | no-match/append-at-validation/half-unit regressions; measured round bytes/events; guide, schemas and in-app help |
+| Simpler search/count choices | `McpLogTools.cs` and response policy: search evidence/context versus count totals, retained legacy modes | public compatibility/schema tests, exact stable 1/10/100 counts and legacy tail measurements; getting-started guide |
+| Consistent continuation/recovery | `QueryContinuationStore`, backend recovery and expected discovery revision: transaction/replay, reauthorization, capacity/expiry and explicit restart intent | cancellation/concurrent replay/catalog/expiry tests, discovery recovery suite and stdio replay; guide |
+| Actionable errors | backend recovery, monitor file errors and response projector: sanitized structured errors, MCP isError, isolated usable partial results | `McpConsistencyRecoveryTests`, schema/protocol tests, initial-missing-file healthy progress; security model |
+
+Security review confirmed configured-ID authorization on creation and every advance/replay/export, signed process-local cursors, bounded retained state, sanitized diagnostics and no network listener or raw path input to MCP. Two disk / one UNC shared gates remain; deterministic contention tests and actual UNC statistics agree. No deferred rolling-date or resolver work was executed.
+
+Two existing test-fixture failures surfaced during full acceptance and were corrected at their causes: the dashboard-order fixture now owns all UI work and shutdown on WpfTestHost; the native icon fixture uses an explicit standard icon baseline independently of the current season. Native assertions, required lanes, waits and test parallelism were preserved. Passing full and desktop reruns followed both fixes.
+
+Local delivery commits (no push, tags, version changes or history rewriting):
+
+| Milestone/change | Commit |
+| --- | --- |
+| M1 contracts/characterization | `41a1e79` |
+| M2 shared predicates/time/errors | `3ea4652` |
+| M3 bounded multi-file monitor | `29795de` |
+| M4 lifecycle/handoff | `7c13e42` |
+| M5 discovery/choices/recovery | `9ab9dc1` |
+| WPF fixture ownership/drain correction | `cce9dd6` |
+| Calendar-independent desktop fixture | `bc6892d` |
+| M6 boundary review, harness, measurements and final docs | This final delivery commit |
+
+Remaining limits are explicit: per-file captures are not an atomic multi-file snapshot; in-place rewrite detection is conservative; filesystem operations cannot promise hard latency deadlines; cursors are process-local and expire; one-run synthetic latency/memory values do not establish general performance percentiles. NuGet vulnerability metadata could not be fetched. Required runtime validation itself is complete.
 
 ## Handoff history
 
 - 2026-11-01: initial plan prepared on `codex/mcp-tool-consistency`; next implementation action is M1.
+- 2026-11-02: final acceptance complete, evidence and resume checkpoint refreshed; all delivery work recorded locally. No owned operations remain.

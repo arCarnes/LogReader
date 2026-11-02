@@ -1,5 +1,6 @@
 namespace LogReader.Core.Tests;
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using LogReader.Core.Interfaces;
@@ -207,6 +208,177 @@ public sealed partial class HeadlessLogQueryBackendTests
         var result = await backend.MonitorLogsAsync(MonitorStart());
         Assert.Equal("monitor_scope_limit", Assert.Single(result.Errors).Code);
         Assert.Null(result.Result);
+    }
+
+    [Fact]
+    public async Task Monitor_PhysicalCapAllowsAliasesAcrossResolverPagesAndRetainsTheirProvenance()
+    {
+        var paths = await CreateFilesAsync("monitor-alias-cap", 100);
+        var entries = Enumerable.Range(0, 300).Select(index => ($"file-{index:D3}", paths[index % paths.Length])).ToArray();
+        var groups = Enumerable.Range(0, 3).Select(batch => new ConfiguredLogGroup(
+            $"dashboard-{batch}", $"Dashboard {batch}", batch, "folder", LogGroupKind.Dashboard,
+            entries.Skip(batch * 100).Take(100).Select(entry => entry.Item1).ToImmutableArray()));
+        var snapshot = new ConfiguredLogCatalogSnapshot(1,
+            [new("folder", "Folder", 0, null, LogGroupKind.Branch, []), .. groups],
+            entries.Select(entry => new ConfiguredLogFile(entry.Item1, entry.Item2)));
+        using var backend = CreateBackend(snapshot);
+        var initial = await backend.MonitorLogsAsync(new() { Targets = [new(ConfiguredLogTargetKind.Folder, "folder")] });
+        Assert.Empty(initial.Errors);
+        Assert.Equal(100, initial.Result!.SelectedFileCount);
+        Assert.All(initial.Result.Files, file => Assert.Equal(3, file.Provenance.Length));
+        Assert.All(initial.Result.Files, file => Assert.Null(file.Error));
+        await File.AppendAllTextAsync(paths[0], "once\n");
+        var page = await backend.MonitorLogsAsync(new() { Cursor = initial.Result.NextCursor, MaxFiles = 100 });
+        Assert.Equal("line-0once", Assert.Single(page.Result!.Files.SelectMany(file => file.Events)).Text);
+        Assert.Equal(100, page.Result.CheckedFileCount);
+    }
+
+    [Fact]
+    public async Task Monitor_AppendAtValidationRemainsBacklogAndIsDeliveredNextPoll()
+    {
+        var path = await CreateFileAsync("monitor-validation-append.log", "old\n");
+        var scanner = new MonitorValidationScanner(() => File.AppendAllText(path, "second\n"));
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), scanner: scanner);
+        var initial = await backend.MonitorLogsAsync(MonitorStart());
+        await File.AppendAllTextAsync(path, "first\n");
+        var first = await backend.MonitorLogsAsync(new() { Cursor = initial.Result!.NextCursor });
+        Assert.Equal("first", Assert.Single(first.Result!.Files.SelectMany(file => file.Events)).Text);
+        Assert.Equal(1, first.Result.BacklogFileCount);
+        Assert.False(first.Result.IsCaughtUp);
+        var second = await backend.MonitorLogsAsync(new() { Cursor = first.Result.NextCursor });
+        Assert.Equal("second", Assert.Single(second.Result!.Files.SelectMany(file => file.Events)).Text);
+        Assert.True(second.Result.IsCaughtUp);
+    }
+
+    [Fact]
+    public async Task Monitor_ControlledUncWorkRetainsUncGateAndAllowsConcurrentLocalObservation()
+    {
+        const string firstUnc = @"\\fixture\share\one.log";
+        const string secondUnc = @"\\fixture\share\two.log";
+        var local = await CreateFileAsync("monitor-local-gate.log", "local\n");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var localStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var inner = new ScriptedLogScanner((path, _, _, _) => Task.FromResult(Result(path, "needle")));
+        var blockPolls = 0;
+        var scanner = new MonitorOpenHookScanner(inner, async (path, checkpoint, ct) =>
+        {
+            checkpoint.ObservedLength = checkpoint.Extent; // Controlled metadata, not a real share.
+            if (!checkpoint.Done || Volatile.Read(ref blockPolls) == 0) return;
+            if (path == firstUnc) { started.TrySetResult(); await release.Task.WaitAsync(ct); }
+            else if (path == local) localStarted.TrySetResult();
+        });
+        using var backend = CreateBackend(CreateSnapshot(("unc-one", firstUnc), ("unc-two", secondUnc), ("local", local)),
+            scanner: scanner, pathExists: _ => false, encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
+        var uncSource = await backend.SearchLogsAsync(new()
+        { Targets = [new(ConfiguredLogTargetKind.LogFile, "unc-one"), new(ConfiguredLogTargetKind.LogFile, "unc-two")], Query = "needle", EnableHandoff = true });
+        var localSource = await backend.SearchLogsAsync(new()
+        { Targets = [new(ConfiguredLogTargetKind.LogFile, "local")], Query = "needle", EnableHandoff = true });
+        var uncInitial = await backend.MonitorLogsAsync(new() { HandoffCursor = uncSource.Result!.HandoffCursor });
+        var localInitial = await backend.MonitorLogsAsync(new() { HandoffCursor = localSource.Result!.HandoffCursor });
+        Volatile.Write(ref blockPolls, 1);
+        var unc = backend.MonitorLogsAsync(new() { Cursor = uncInitial.Result!.NextCursor });
+        Task<LogOperationEnvelope<LogMonitorResult>>? localPoll = null;
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            localPoll = backend.MonitorLogsAsync(new() { Cursor = localInitial.Result!.NextCursor });
+            await localStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        finally
+        {
+            release.TrySetResult();
+            await unc.WaitAsync(TimeSpan.FromSeconds(3));
+            if (localPoll != null) await localPoll.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        Assert.Empty((await unc).Errors);
+        Assert.Empty((await localPoll!).Errors);
+        Assert.Equal(2, (await unc).Result!.CheckedFileCount);
+    }
+
+    private sealed class MonitorOpenHookScanner(IResumableLogScanner inner,
+        Func<string, ResumableFileCheckpoint, CancellationToken, Task> beforeOpen) : IResumableLogScanner
+    {
+        public Regex? PrepareRegex(SearchRequest request) => inner.PrepareRegex(request);
+        public async Task<IResumableLogScan> OpenAsync(string path, ResumableFileCheckpoint checkpoint, CancellationToken ct)
+        {
+            await beforeOpen(path, checkpoint, ct);
+            return await inner.OpenAsync(path, checkpoint, ct);
+        }
+    }
+
+    private sealed class MonitorValidationScanner(Action append) : IResumableLogScanner
+    {
+        private readonly IResumableLogScanner _inner = new ResumableLogScanner(new FileEncodingDetectionService());
+        private int _validations;
+        private void BeforeValidation() { if (Interlocked.Increment(ref _validations) == 2) append(); }
+        public Regex? PrepareRegex(SearchRequest request) => _inner.PrepareRegex(request);
+        public async Task<IResumableLogScan> OpenAsync(string path, ResumableFileCheckpoint checkpoint, CancellationToken ct)
+            => new Scan(this, await _inner.OpenAsync(path, checkpoint, ct));
+        private sealed class Scan(MonitorValidationScanner owner, IResumableLogScan inner) : IResumableLogScan
+        {
+            public Task<EvaluatedScanLine?> ReadNextAsync(SearchRequest request, Regex? regex, ScanWorkBudget budget, int maxBytes, CancellationToken ct)
+                => inner.ReadNextAsync(request, regex, budget, maxBytes, ct);
+            public void ValidateAfterRead()
+            {
+                owner.BeforeValidation();
+                inner.ValidateAfterRead();
+            }
+            public ValueTask DisposeAsync() => inner.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Monitor_UnrepresentableDateReturnsStructuredErrorBeforeOpeningFiles()
+    {
+        var path = await CreateFileAsync("monitor-invalid-date.log", "old\n");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var response = await new McpLogTools(backend).MonitorLogsAsync(
+            [new(ConfiguredLogTargetKind.LogFile, "file")], dateOffsetDays: int.MaxValue);
+        Assert.True(response.IsError);
+        Assert.Equal("invalid_date_offset", response.StructuredContent!.Value.GetProperty("errors")[0].GetProperty("code").GetString());
+        Assert.False(response.StructuredContent.Value.TryGetProperty("result", out _));
+    }
+
+    [Fact]
+    public async Task Monitor_ExclusionOnlyRegexUsesSharedTimeOnlyPredicateRules()
+    {
+        var path = await CreateFileAsync("monitor-exclusion-only.log", "old\n");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.MonitorLogsAsync(new()
+        {
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], ExcludeQuery = "drop$", UseRegex = true,
+            StartTimestamp = "09:00", EndTimestamp = "11:00"
+        });
+        Assert.Empty(initial.Errors);
+        await File.AppendAllTextAsync(path, "10:00:00 keep\n10:00:01 drop\n12:00:00 outside\n");
+        var page = await backend.MonitorLogsAsync(new() { Cursor = initial.Result!.NextCursor });
+        Assert.Equal("10:00:00 keep", Assert.Single(page.Result!.Files.SelectMany(file => file.Events)).Text);
+        var invalid = await new McpLogTools(backend).MonitorLogsAsync(
+            [new(ConfiguredLogTargetKind.LogFile, "file")], query: "");
+        Assert.True(invalid.IsError);
+        Assert.Equal("query_required", invalid.StructuredContent!.Value.GetProperty("errors")[0].GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Monitor_InitialMissingFileDoesNotClaimRetainedBoundaryAndHealthyFileAdvances()
+    {
+        var missing = Path.Combine(_testDirectory, "monitor-initial-missing.log");
+        var healthy = await CreateFileAsync("monitor-initial-healthy.log", "old\n");
+        using var backend = CreateBackend(CreateSnapshot(("missing", missing), ("healthy", healthy)));
+        var initial = await backend.MonitorLogsAsync(MonitorStart());
+        Assert.True(initial.IsPartial);
+        Assert.Equal(1, initial.Result!.StoppedFileCount);
+        var stopped = initial.Result.Files[0];
+        Assert.Equal("stopped", stopped.State);
+        Assert.False(stopped.Error!.IsRetryable);
+        Assert.Contains("could not start", stopped.Error.Message);
+        Assert.DoesNotContain("retained", stopped.Error.Message);
+        Assert.Contains("explicit intent", stopped.Error.Message);
+        await File.AppendAllTextAsync(healthy, "healthy append\n");
+        var page = await backend.MonitorLogsAsync(new() { Cursor = initial.Result.NextCursor });
+        Assert.Equal("healthy append", Assert.Single(page.Result!.Files.SelectMany(file => file.Events)).Text);
+        Assert.Equal(1, page.Result.StoppedFileCount);
     }
 
     private sealed class GatedMonitorScanner(Func<string, int, CancellationToken, Task> beforeOpen) : IResumableLogScanner

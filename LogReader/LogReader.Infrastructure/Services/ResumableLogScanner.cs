@@ -270,8 +270,10 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
                             }
                             state.ReadOffset += unit;
                             reader.Position += unit;
+                            state.LastLineEndedCr = false;
                             continue;
                         }
+                        state.LastLineEndedCr = false;
                     }
                     if (state.PendingCr)
                     {

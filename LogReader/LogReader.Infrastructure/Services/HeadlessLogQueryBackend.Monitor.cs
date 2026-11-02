@@ -56,29 +56,74 @@ public sealed partial class HeadlessLogQueryBackend
             var periodEnded = state.ObservationEndsAt.HasValue && _now() >= state.ObservationEndsAt;
             if (initial && query.HandoffCursor == null)
             {
+                var capturedNow = _now();
                 if (!CountTimeWindowResolver.TryResolve(new LogCountQuery
                     { StartTimestamp = query.StartTimestamp, EndTimestamp = query.EndTimestamp, RelativeWindow = query.RelativeWindow },
-                    _now(), _localTimeZone, _limits, out var time, out var error))
+                    capturedNow, _localTimeZone, _limits, out var time, out var error))
                     return Rejected<LogMonitorResult>(requestId, [error!]);
                 state.Time = time!;
-                state.ReferenceDate = _today();
+                state.ReferenceDate = query.RelativeWindow == null ? _today() :
+                    DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(capturedNow, _localTimeZone).DateTime);
                 state.DateOffsetDays = query.DateOffsetDays;
+                if (state.DateOffsetDays > state.ReferenceDate.DayNumber)
+                    return Rejected<LogMonitorResult>(requestId,
+                        [Error("invalid_date_offset", "dateOffsetDays must select a representable date on or before the captured server date.")]);
                 state.Request = SearchRequest.Create(query.Query ?? "", query.UseRegex, query.CaseSensitive, [],
                     SearchRequestSourceMode.Tail, SearchRequestUsage.DiskSearch, time!.StartTimestamp, time.EndTimestamp,
                     maxRetainedLineTextLength: _limits.MaximumCharactersPerLine);
                 state.Request.ExcludeQuery = query.ExcludeQuery;
-                var selection = await ResolveAsync(catalog.Snapshot, query.Targets, query.DateOffsetDays,
-                    state.ReferenceDate, MaximumMonitorFiles, null, deadline.Token).ConfigureAwait(false);
-                if (!selection.IsSuccess)
-                    return SelectionFailure<LogMonitorResult>(requestId, selection);
-                if (selection.HasMore || selection.Summary.ExpandedStableFileCount > MaximumMonitorFiles)
-                    return Rejected<LogMonitorResult>(requestId,
-                        [Error("monitor_scope_limit", $"Select at most {MaximumMonitorFiles} physical files for one monitor.")]);
-                if (!selection.FileErrors.IsEmpty)
-                    return Rejected<LogMonitorResult>(requestId, selection.FileErrors.Select(file => Error(file.Code, file.Message, targetId: file.FileId)).ToImmutableArray());
-                foreach (var file in selection.Files)
+                ConfiguredLogSelectionContinuation? selectionCursor = null;
+                var byPath = new Dictionary<string, MonitorFile>(StringComparer.OrdinalIgnoreCase);
+                do
                 {
-                    var tracker = new MonitorFile(file);
+                    var selection = await ResolveAsync(catalog.Snapshot, query.Targets, query.DateOffsetDays,
+                        state.ReferenceDate, _limits.MaximumFiles, selectionCursor, deadline.Token).ConfigureAwait(false);
+                    if (!selection.IsSuccess)
+                        return SelectionFailure<LogMonitorResult>(requestId, selection);
+                    foreach (var file in selection.Files)
+                    {
+                        if (byPath.TryGetValue(file.PhysicalPath, out var existing))
+                        {
+                            existing.File = existing.File with
+                            {
+                                EquivalentFileIds = existing.File.EquivalentFileIds.Union(file.EquivalentFileIds, StringComparer.Ordinal).ToImmutableArray(),
+                                Provenance = existing.File.Provenance.Union(file.Provenance).ToImmutableArray(),
+                                OrderedPathCandidates = existing.File.OrderedPathCandidates.Union(file.OrderedPathCandidates, StringComparer.OrdinalIgnoreCase).ToImmutableArray()
+                            };
+                        }
+                        else
+                        {
+                            var tracker = new MonitorFile(file) { StableIndex = selection.StableFileIndexesById[file.FileId] };
+                            byPath.Add(file.PhysicalPath, tracker);
+                            state.Files.Add(tracker);
+                        }
+                    }
+                    foreach (var file in selection.FileErrors)
+                        state.Files.Add(new MonitorFile(new ResolvedConfiguredLogFile(file.FileId, file.DisplayName,
+                            "", [], [], file.Provenance))
+                        {
+                            StableIndex = selection.StableFileIndexesById[file.FileId], Stopped = true,
+                            Error = Error(file.Code, file.Message, targetId: file.FileId)
+                        });
+                    if (state.Files.Count > MaximumMonitorFiles)
+                        return Rejected<LogMonitorResult>(requestId,
+                            [Error("monitor_scope_limit", $"Select at most {MaximumMonitorFiles} physical files for one monitor (unresolved entries also consume slots).")]);
+                    if (state.RetainedBytes > _limits.MaximumContinuationSessionBytes)
+                        throw new ContinuationException("continuation_capacity_exceeded", "query_too_large");
+                    // Revisit later aliases so their authorization routes merge into the retained
+                    // physical identity. The resolver's candidate ceiling still bounds all work.
+                    selectionCursor = selection.Continuation is { } next
+                        ? next with { SeenPhysicalPathIdentities = [] } : null;
+                } while (selectionCursor != null);
+                state.Files.Sort((left, right) => left.StableIndex.CompareTo(right.StableIndex));
+                foreach (var tracker in state.Files)
+                {
+                    if (tracker.Stopped)
+                    {
+                        files.Add(MonitorFileResult(tracker, [], provenanceBudget));
+                        continue;
+                    }
+                    var file = tracker.File;
                     try
                     {
                         await ExecuteDiskOperationAsync(file.PhysicalPath, async token =>
@@ -90,9 +135,12 @@ public sealed partial class HeadlessLogQueryBackend
                     catch (Exception ex) when (IsPerFileException(ex))
                     {
                         tracker.Stopped = true;
-                        tracker.Error = MonitorError(ex, file.FileId);
+                        tracker.Error = MonitorError(ex, file.FileId) with
+                        {
+                            Message = "Observation could not start for this file because a safe initial boundary was unavailable. Other admitted files may continue. A new observation requires explicit intent.",
+                            IsRetryable = false
+                        };
                     }
-                    state.Files.Add(tracker);
                     files.Add(MonitorFileResult(tracker, [], provenanceBudget));
                 }
                 // No cursor is committed until every admitted file has a baseline or an explicit stopped error.
@@ -134,7 +182,9 @@ public sealed partial class HeadlessLogQueryBackend
                                 if (_encodingDetection.ResolveEncodingDecision(tracker.File.PhysicalPath, FileEncoding.Auto)
                                     .ResolvedEncoding != checkpoint.Encoding)
                                     throw new ScanFileException("log_encoding_changed");
-                                var grew = checkpoint.ObservedLength > checkpoint.Extent;
+                                var nextExtent = checkpoint.Encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be
+                                    ? checkpoint.ObservedLength & ~1L : checkpoint.ObservedLength;
+                                var grew = nextExtent > checkpoint.Extent;
                                 if (grew && checkpoint.Done)
                                 {
                                     if (checkpoint.LastLineUnterminated)
@@ -145,8 +195,7 @@ public sealed partial class HeadlessLogQueryBackend
                                     checkpoint.SkipLeadingLf = checkpoint.LastLineEndedCr;
                                     checkpoint.Done = false;
                                 }
-                                checkpoint.Extent = checkpoint.Encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be
-                                    ? checkpoint.ObservedLength & ~1L : checkpoint.ObservedLength;
+                                checkpoint.Extent = nextExtent;
                                 var fileBudget = new ScanWorkBudget(_limits.SearchWorkMilliseconds,
                                     Math.Min(MonitorFileBytes, budget.RemainingBytes), _scanTimestamp);
                                 try
@@ -216,7 +265,7 @@ public sealed partial class HeadlessLogQueryBackend
             periodEnded |= state.ObservationEndsAt.HasValue && _now() >= state.ObservationEndsAt;
             var stopped = state.Files.Count(file => file.Stopped);
             var failed = state.Files.Any(file => file.Error != null);
-            var backlog = state.Files.Count(file => !file.Stopped && !file.Checkpoint.Done);
+            var backlog = state.Files.Count(MonitorHasBacklog);
             var terminal = query.Release || periodEnded || stopped == state.Files.Count;
             var result = new LogMonitorResult
             {
@@ -258,7 +307,7 @@ public sealed partial class HeadlessLogQueryBackend
     {
         using var source = await Continuations.AcquireSnapshotAsync(cursor, revision, ct).ConfigureAwait(false);
         if (source.State is not QueryTraversal snapshot || !snapshot.ResolverFinished || snapshot.Predicate == null ||
-            snapshot.Files.Count > MaximumMonitorFiles || snapshot.Files.Any(file => file.Error != null ||
+            snapshot.Files.Count > MaximumMonitorFiles || snapshot.Files.Any(file => !file.Done || file.Pending.Count != 0 || file.Error != null ||
                 !file.Checkpoint.Initialized || !file.Checkpoint.Done || !file.Checkpoint.Generation.IsKnown ||
                 file.Checkpoint.Reasons.Any(reason => reason != "file_changed_during_search")))
             throw new ContinuationException("handoff_boundary_unavailable");
@@ -296,6 +345,7 @@ public sealed partial class HeadlessLogQueryBackend
             FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
         if (FileGenerationTokenProvider.Capture(stream) != checkpoint.Generation || stream.Length < checkpoint.Extent)
             throw new ScanFileException("log_generation_changed");
+        var contentStart = checkpoint.ReadOffset; // Actual BOM evidence from the scanner, including BOM-less UTF-16.
         var length = checkpoint.Extent;
         var count = (int)Math.Min(length, MonitorBoundaryBytes);
         var probe = new byte[count];
@@ -316,11 +366,10 @@ public sealed partial class HeadlessLogQueryBackend
             }
             start = length - count + offset;
         }
-        if (start == length - count && length > count && !terminated)
+        if (start == length - count && start > contentStart && !terminated)
             throw new ScanFileException("monitor_boundary_unavailable");
         checkpoint.ReadOffset = length;
-        checkpoint.LastLineStartOffset = Math.Max(start, checkpoint.ReadOffset == length && length <= count ?
-            checkpoint.Encoding switch { FileEncoding.Utf8Bom => 3, FileEncoding.Utf16 or FileEncoding.Utf16Be => 2, _ => 0 } : 0);
+        checkpoint.LastLineStartOffset = Math.Max(start, contentStart);
         checkpoint.LastLineUnterminated = !terminated;
         checkpoint.LastLineEndedCr = count >= unit && (unit == 1 ? probe[^1] == 13 :
             checkpoint.Encoding == FileEncoding.Utf16 ? probe[^2] == 13 && probe[^1] == 0 : probe[^2] == 0 && probe[^1] == 13);
@@ -343,19 +392,19 @@ public sealed partial class HeadlessLogQueryBackend
             errors.Add(Error("monitor_options_bound", "A poll cursor cannot be combined with handoff or a new period."));
         if (query.Cursor != null || query.HandoffCursor != null)
         {
-            if (query.Targets.Count != 0 || query.Query != null || query.ExcludeQuery != null || query.UseRegex ||
+            if (query.Targets is { Count: > 0 } || query.Query != null || query.ExcludeQuery != null || query.UseRegex ||
                 query.CaseSensitive || query.DateOffsetDays != 0 || query.StartTimestamp != null || query.EndTimestamp != null || query.RelativeWindow != null)
                 errors.Add(Error("monitor_options_bound", "A monitor cursor already binds selection and predicates. Poll using cursor and budget controls only."));
         }
         else
         {
-            if (query.Targets.Count == 0 || query.Targets.Count > _limits.MaximumTargets)
+            if (query.Targets == null || query.Targets.Count == 0 || query.Targets.Count > _limits.MaximumTargets)
                 errors.Add(Error("invalid_targets", "Supply configured targets within the server target limit."));
             if (query.DateOffsetDays < 0)
                 errors.Add(Error("invalid_date_offset", "dateOffsetDays cannot be negative."));
-            if (query.Query == null && (query.UseRegex || query.CaseSensitive))
-                errors.Add(Error("invalid_monitor_filter", "Regex/case options require an inclusion query."));
-            ValidateExclusion(query.Query, query.UseRegex, query.CaseSensitive, errors);
+            if (query.Query == null && query.ExcludeQuery == null && (query.UseRegex || query.CaseSensitive))
+                errors.Add(Error("invalid_monitor_filter", "Regex/case options require an inclusion or exclusion query."));
+            ValidateExclusion(query.Query, query.UseRegex, query.CaseSensitive, errors, "query");
             ValidateExclusion(query.ExcludeQuery, query.UseRegex, query.CaseSensitive, errors);
             if (query.StartTimestamp is { Length: > ConfiguredLogLimits.DefaultMaxTimestampCharacters } ||
                 query.EndTimestamp is { Length: > ConfiguredLogLimits.DefaultMaxTimestampCharacters } ||
@@ -367,24 +416,31 @@ public sealed partial class HeadlessLogQueryBackend
 
     private static ConfiguredLogRequestError MonitorError(Exception ex, string fileId) => Error(
         ex is ScanFileException scan ? scan.Code : ex is RegexMatchTimeoutException ? "regex_match_timeout" : "monitor_file_unavailable",
-        ex is ScanFileException or RegexMatchTimeoutException
+        ex is RegexMatchTimeoutException
+            ? "The observation filter exceeded its regex match timeout. Report incomplete observation; changing the filter requires an explicitly requested new observation."
+            : ex is ScanFileException
             ? "Observation stopped for this file because its content, encoding, or safe boundary cannot be continued. Report the gap; starting another observation requires explicit intent."
             : "This file is unavailable. Its boundary was retained; healthy files can advance on the next bounded poll.",
         retryable: ex is not (ScanFileException or RegexMatchTimeoutException), targetId: fileId);
+
+    private static bool MonitorHasBacklog(MonitorFile file)
+        => !file.Stopped && (!file.Checkpoint.Done || file.Checkpoint.ObservedLength > file.Checkpoint.Extent);
 
     private LogMonitorFileResult MonitorFileResult(MonitorFile file, ImmutableArray<LogMonitorEvent> events,
         ResponseCharacterBudget budget)
     {
         var provenance = RetainProvenance(file.File.Provenance, budget);
         return new(file.File.FileId, file.File.DisplayName, provenance.Items,
-            _cursorCodec.GetGenerationIdentity(new FileScanGenerationEvidence(file.Checkpoint.Generation, FileGenerationCorrelation.Current)),
-            file.Stopped ? "stopped" : file.Error != null ? "unavailable" : file.Checkpoint.Done ? "caught_up" : "backlog",
-            Math.Max(0, file.Checkpoint.Extent - file.Checkpoint.ReadOffset), events, file.Error)
+            file.Checkpoint.Generation.IsKnown
+                ? _cursorCodec.GetGenerationIdentity(new FileScanGenerationEvidence(file.Checkpoint.Generation, FileGenerationCorrelation.Current)) : null,
+            file.Stopped ? "stopped" : file.Error != null ? "unavailable" : MonitorHasBacklog(file) ? "backlog" : "caught_up",
+            Math.Max(0, Math.Max(file.Checkpoint.Extent, file.Checkpoint.ObservedLength) - file.Checkpoint.ReadOffset), events, file.Error)
         { ProvenanceTotalCount = provenance.TotalCount, IsProvenanceTruncated = provenance.IsTruncated };
     }
 
     private sealed class MonitorFile(ResolvedConfiguredLogFile file)
     {
+        public int StableIndex;
         public ResolvedConfiguredLogFile File = file;
         public ResumableFileCheckpoint Checkpoint = new();
         public bool Stopped;
@@ -392,7 +448,7 @@ public sealed partial class HeadlessLogQueryBackend
         public long? PublishedOffset;
         public bool PublishedMatched;
         public MonitorFile Clone() => new(File)
-        { Checkpoint = Checkpoint.Clone(), Stopped = Stopped, Error = Error, PublishedOffset = PublishedOffset, PublishedMatched = PublishedMatched };
+        { StableIndex = StableIndex, Checkpoint = Checkpoint.Clone(), Stopped = Stopped, Error = Error, PublishedOffset = PublishedOffset, PublishedMatched = PublishedMatched };
         public long RetainedBytes => new TraversalFile(File, 0).RetainedBytes + Checkpoint.RetainedBytes;
     }
 

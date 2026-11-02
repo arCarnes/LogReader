@@ -150,6 +150,14 @@ One scheduler in the shared session registry admits preview, foreground indexing
 
 Progress uses the captured file extent and is published at most every 150 ms, with immediate initial and terminal updates. A loading dashboard has a spinner beside its name. Background completion fades its row once when all files settle and at least one is usable, including partial success; failed files retain ordinary error reporting. Completion never changes scope, selection, or row order, and animation preferences are respected. Shutdown cancels scope subscribers and drains owned session/index work.
 
+## MCP consistency validation
+
+The additive `monitor_logs` tool coordinates up to 100 deduplicated configured file paths through one process-owned cursor. It builds no full-file indexes. See [MCP server guide](McpLogServerGuide.md) for shared predicates, timestamp coverage, scope rounds, replay, selected-date binding and explicit handoff. The existing UI monitor-new-matches stop policy is retained; legacy tail resets remain compatible.
+
+Use `packaging/scripts/Measure-McpLogServer.ps1 -ExecutablePath <fresh local publish> -FileCount 1|10|100 -LinesPerFile 250 -IncludeStatistics -IncludeMonitorConsistency` under PowerShell 7. The switch adds aliases, monitor initialization/idle/nonmatch/match/replay/hot-file rounds, frozen-extent drift continuation, explicit handoff and release. Report version 9 records actual per-poll checked/unchecked/backlog files, scan bytes, response bytes, latency, memory, artifact hashes and schema checks. For an authorized existing network test directory, add `-LogDirectoryRoot <absolute test root>`. The harness inspects only that root and creates dedicated synthetic run children; it does not enumerate the root's parents or siblings, and retains the run folders. The helper is `Measure-McpMonitorConsistency.ps1`; it is loaded by the main harness. Both framework-dependent validation output and packaged single-file sidecars are supported. Cancellation transport liveness is measured without startup sleeps; it does not claim work admission. Deterministic gated tests prove rollback/drain, and clean stdin shutdown provides separate process drain evidence.
+
+Build before tests with `-p:UseSharedCompilation=false` when compiler-server startup is unavailable. Run focused monitor/lifecycle/handoff suites three times, then the full solution with `Category!=InteractiveDesktop`. Run `.github/scripts/Invoke-InteractiveDesktopTests.ps1` separately; unavailable access or zero tests must fail that lane. [Consistency performance evidence](McpToolConsistencyMeasurements.md) records actual local and real UNC runs at 1/10/100 files, separately from controlled UNC contention tests.
+
 ## Dashboard tailing
 
 - Loaded dashboards outside the current scope poll every 30 seconds, including when the window is unfocused or minimized. Their indexes and active tail filters continue updating; hidden viewports refresh on activation.
@@ -209,7 +217,7 @@ Packaging notes:
 - ZIP packaging publishes `WeezTail.exe` and `WeezTail.Mcp.exe`, then copies the matching `Portable.WeezTail.install.json` or `AppData.WeezTail.install.json` template beside them
 - `packaging/scripts/Test-ZipArtifactValidation.ps1` checks both valid layouts and rejection of mismatched modes or AppData cache entries; `Publish-All.ps1` runs these fixtures.
 - ZIP packaging validates both directories and ZIPs against the selected storage mode. Portable requires `Data` and `Cache`; AppData allows only the two executables and install config. Both reject debug symbols. Validate AppData with `Validate-PortableArtifact.ps1 -StorageMode LocalAppData`.
-- Portable, AppData, and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact six-tool surface, calls `server_status` and `count_logs`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
+- Portable, AppData, and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact seven-tool surface, calls `server_status`, `count_logs` and `monitor_logs`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
 - MSI packaging publishes both executables and copies `packaging/Msi.WeezTail.install.json` beside them
 - MSI packaging builds an x64 native action DLL with a statically linked CRT, validates its imports/exports, and runs JSON, migration, consent, cleanup, rollback, interruption-recovery, locked-file, and path-safety fixtures without a script host
 - MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm identity/version guards plus compiled action types, hidden action data, upgrade rollback boundaries, and transactional cleanup ordering in the MSI tables.
@@ -256,7 +264,7 @@ Project boundaries:
 
 - `LogReader.Core` owns SDK-independent configured-target, tree, request, result, error, status, limit, and cursor contracts.
 - `LogReader.Infrastructure` owns non-interactive storage resolution, immutable persisted snapshot reading, target authorization, bounded headless queries, and owner-scoped index caches.
-- `LogReader.Mcp` produces `WeezTail.Mcp.exe` and owns the official `ModelContextProtocol.Core` adapter, exact six-tool registration, stdio lifecycle, and headless backend composition. It must remain free of App and WPF references.
+- `LogReader.Mcp` produces `WeezTail.Mcp.exe` and owns the official `ModelContextProtocol.Core` adapter, exact seven-tool registration, stdio lifecycle, and headless backend composition. It must remain free of App and WPF references.
 - `LogReader.App` uses the generated WPF entry point and has no MCP project or SDK dependency.
 
 Cache ownership is process-scoped. Every MCP process has a unique owner directory and lifetime lock; cleanup can remove a stale owner only after acquiring its lock. UI sessions remain independent and keep their existing behavior. Never map, delete, or infer ownership of another process's `idx_*.bin` files.

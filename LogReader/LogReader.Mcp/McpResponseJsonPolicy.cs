@@ -242,7 +242,7 @@ internal static class McpResponseJsonPolicy
         if (IsEnvelope(type))
         {
             Describe("errors", "Request-level errors; inspect before interpreting result. Empty/omitted means none. MCP isError and nested file errors must also be checked.");
-            Describe("result", "Absent/null when the operation is rejected; do not interpret as zero matches. Check envelope.errors and result.files[*].error or result.file.error even when partial/truncated flags are false.");
+            Describe("result", "May be absent/null when rejected; discovery can retain empty revision/error metadata. Check MCP isError and envelope.errors before interpreting empty results, and result.files[*].error or result.file.error even when partial/truncated flags are false.");
         }
         if (type == typeof(ConfiguredLogRequestError))
         {

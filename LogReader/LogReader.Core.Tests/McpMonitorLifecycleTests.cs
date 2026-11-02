@@ -1,6 +1,7 @@
 namespace LogReader.Core.Tests;
 
 using System.Text;
+using LogReader.Core;
 using LogReader.Core.Models;
 
 public sealed partial class HeadlessLogQueryBackendTests
@@ -207,6 +208,78 @@ public sealed partial class HeadlessLogQueryBackendTests
         var page = await backend.MonitorLogsAsync(new() { Cursor = initial.Result!.NextCursor });
         Assert.Equal("2026-08-03", page.Result!.SelectedDate);
         Assert.Equal("selected append", Assert.Single(page.Result.Files.SelectMany(file => file.Events)).Text);
+    }
+
+    [Fact]
+    public async Task MonitorLifecycle_SplitCrLfDoesNotSwallowSubsequentEmptyLine()
+    {
+        var path = await CreateFileAsync("monitor-empty-after-crlf.log", "old\r");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.MonitorLogsAsync(MonitorStart());
+        await File.AppendAllTextAsync(path, "\n");
+        var completion = await backend.MonitorLogsAsync(new() { Cursor = initial.Result!.NextCursor });
+        Assert.Empty(completion.Result!.Files.SelectMany(file => file.Events));
+        await File.AppendAllTextAsync(path, "\n");
+        var blank = await backend.MonitorLogsAsync(new() { Cursor = completion.Result.NextCursor });
+        var line = Assert.Single(blank.Result!.Files.SelectMany(file => file.Events));
+        Assert.Equal("", line.Text);
+        Assert.Equal(5, line.ByteOffset);
+    }
+
+    [Fact]
+    public async Task MonitorLifecycle_Utf16HalfCodeUnitRemainsBacklogUntilCompleted()
+    {
+        var path = Path.Combine(_testDirectory, "monitor-half-unit.log");
+        await File.WriteAllTextAsync(path, "old\n", Encoding.Unicode);
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.MonitorLogsAsync(MonitorStart());
+        await using (var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            await stream.WriteAsync(new byte[] { 65 });
+        var half = await backend.MonitorLogsAsync(new() { Cursor = initial.Result!.NextCursor });
+        Assert.Equal(1, half.Result!.BacklogFileCount);
+        Assert.False(half.Result.IsCaughtUp);
+        Assert.False(half.Result.IsIdle);
+        Assert.Empty(half.Result.Files.SelectMany(file => file.Events));
+        await using (var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            await stream.WriteAsync(new byte[] { 0 });
+        var whole = await backend.MonitorLogsAsync(new() { Cursor = half.Result.NextCursor });
+        Assert.Equal("A", Assert.Single(whole.Result!.Files.SelectMany(file => file.Events)).Text);
+        Assert.Equal(0, whole.Result.BacklogFileCount);
+    }
+
+    [Fact]
+    public async Task Handoff_QueryCapCannotSkipPrefetchedUncommittedMatches()
+    {
+        var path = await CreateFileAsync("handoff-prefetched-cap.log", "needle one\nneedle two\nneedle three\n");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var source = await backend.SearchLogsAsync(new()
+        {
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle", EnableHandoff = true,
+            MaxQueryHits = 1, IncludeContextAfter = 2
+        });
+        Assert.False(source.Result!.IsTraversalComplete);
+        Assert.Equal(1, source.Result.MatchingLineCount);
+        var handoff = await backend.MonitorLogsAsync(new() { HandoffCursor = source.Result.HandoffCursor });
+        Assert.Null(handoff.Result);
+        Assert.Equal("handoff_boundary_unavailable", Assert.Single(handoff.Errors).Code);
+    }
+
+    [Theory]
+    [InlineData(FileEncoding.Utf16)]
+    [InlineData(FileEncoding.Utf16Be)]
+    public async Task MonitorLifecycle_BomlessUtf16UnfinishedLineRetainsItsFirstCharacter(FileEncoding encoding)
+    {
+        var path = Path.Combine(_testDirectory, $"monitor-bomless-{encoding}.log");
+        var decoder = EncodingHelper.GetEncoding(encoding);
+        await File.WriteAllBytesAsync(path, decoder.GetBytes("first"));
+        using var backend = CreateBackend(CreateSnapshot(("file", path)),
+            encodingDetection: new CountingEncodingDetectionService(encoding));
+        var initial = await backend.MonitorLogsAsync(MonitorStart());
+        await using (var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            await stream.WriteAsync(decoder.GetBytes(" more\n"));
+        var page = await backend.MonitorLogsAsync(new() { Cursor = initial.Result!.NextCursor });
+        Assert.Equal("first more", Assert.Single(page.Result!.Files.SelectMany(file => file.Events)).Text);
+        Assert.True(page.Result.IsCaughtUp);
     }
 
 }
