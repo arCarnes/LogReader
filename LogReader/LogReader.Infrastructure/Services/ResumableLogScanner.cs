@@ -40,6 +40,10 @@ internal sealed class ResumableFileCheckpoint
     public long LastLineStartOffset;
     public bool LastLineUnterminated;
     public bool LineTerminated;
+    public bool LineEndedCr;
+    public bool LastLineEndedCr;
+    public bool LastLineMatched;
+    public bool SkipLeadingLf;
     public bool Initialized;
     public FileEncoding Encoding;
     public FileGenerationToken Generation;
@@ -62,6 +66,7 @@ internal sealed class ResumableFileCheckpoint
     public ResumableFileCheckpoint Clone() => new()
     {
         EvaluatedLines = EvaluatedLines, MissingTimestamps = MissingTimestamps, OutsideTimeRange = OutsideTimeRange,
+        LineEndedCr = LineEndedCr, LastLineEndedCr = LastLineEndedCr, LastLineMatched = LastLineMatched, SkipLeadingLf = SkipLeadingLf,
         LastLineStartOffset = LastLineStartOffset, LastLineUnterminated = LastLineUnterminated, LineTerminated = LineTerminated,
         Initialized = Initialized, Encoding = Encoding, Generation = Generation, Extent = Extent,
         InitialLength = InitialLength, ObservedLength = ObservedLength, ObservedWriteUtc = ObservedWriteUtc,
@@ -253,12 +258,28 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
                     var value = unit == 1 ? buffer[offset] : state.Encoding == FileEncoding.Utf16
                         ? buffer[offset] | buffer[offset + 1] << 8
                         : buffer[offset] << 8 | buffer[offset + 1];
+                    if (state.SkipLeadingLf)
+                    {
+                        state.SkipLeadingLf = false;
+                        if (value == '\n')
+                        {
+                            if (!budget.TryAddBytes(unit))
+                            {
+                                state.SkipLeadingLf = true;
+                                return null;
+                            }
+                            state.ReadOffset += unit;
+                            reader.Position += unit;
+                            continue;
+                        }
+                    }
                     if (state.PendingCr)
                     {
                         if (value == '\n')
                         {
                             if (!budget.TryAddBytes(unit))
                                 return null;
+                            state.LineEndedCr = false;
                             state.ReadOffset += unit;
                             state.LineBytes += unit;
                             reader.Position += unit;
@@ -315,6 +336,7 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
                         state.LineTerminated = true;
                     if (ending == '\r')
                     {
+                        state.LineEndedCr = true;
                         state.PendingCr = true;
                         continue;
                     }
@@ -376,6 +398,9 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
 
     private static EvaluatedScanLine FinishLine(ResumableFileCheckpoint state, string line, SearchHit? hit, int occurrences)
     {
+        state.LastLineEndedCr = state.LineEndedCr;
+        state.LineEndedCr = false;
+        state.LastLineMatched = occurrences > 0;
         state.LastLineStartOffset = state.ReadOffset - state.LineBytes;
         state.LastLineUnterminated = !state.LineTerminated;
         state.LineTerminated = false;

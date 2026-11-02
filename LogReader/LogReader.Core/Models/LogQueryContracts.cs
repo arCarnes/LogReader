@@ -7,6 +7,8 @@ public sealed record LogTimestampCoverage(long EvaluatedLineCount, long MissingO
 
 public sealed class LogSearchQuery
 {
+    public bool EnableHandoff { get; init; }
+
     public string? RelativeWindow { get; init; }
 
     public IReadOnlyList<ConfiguredLogTarget> Targets { get; init; } = [];
@@ -46,6 +48,8 @@ public sealed class LogSearchQuery
 
 public sealed class LogSearchResult
 {
+    public string? HandoffCursor { get; init; }
+
     public LogTimestampCoverage TimestampCoverage { get; init; } = new(0, 0, 0);
 
     public LogCountResolvedTimeRange? ResolvedTimeRange { get; init; }
@@ -158,6 +162,8 @@ public sealed record LogSearchExcerptLine(
 
 public sealed class LogCountQuery
 {
+    public bool EnableHandoff { get; init; }
+
     public string? Cursor { get; init; }
 
     public IReadOnlyList<ConfiguredLogTarget> Targets { get; init; } = [];
@@ -185,6 +191,8 @@ public sealed class LogCountQuery
 
 public sealed class LogCountResult
 {
+    public string? HandoffCursor { get; init; }
+
     public LogTimestampCoverage TimestampCoverage { get; init; } = new(0, 0, 0);
 
     public const int CurrentContractVersion = 3;

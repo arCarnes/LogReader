@@ -59,6 +59,9 @@ public sealed class McpStdioProtocolTests
                 "read_log_tail",
                 new Dictionary<string, object?> { ["fileId"] = "missing-file" },
                 cancellationToken: cancellation.Token);
+            var monitor = await client.CallToolAsync("monitor_logs",
+                new Dictionary<string, object?> { ["targets"] = new[] { new { kind = "logFile", id = "missing-file" } } },
+                cancellationToken: cancellation.Token);
             var status = await client.CallToolAsync("server_status", arguments: null, cancellationToken: cancellation.Token);
 
             Assert.Equal("weeztail", client.ServerInfo.Name);
@@ -71,7 +74,13 @@ public sealed class McpStdioProtocolTests
             Assert.Equal(
                 ["count_logs", "list_log_tree", "monitor_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
                 tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
-            Assert.All([list, search, count, read, tail, status], AssertStructuredSuccess);
+            Assert.All([list, status], AssertStructuredSuccess);
+            Assert.All([search, count, read, tail, monitor], response =>
+            {
+                Assert.True(response.IsError);
+                Assert.NotEmpty(response.StructuredContent!.Value.GetProperty("errors").EnumerateArray());
+                Assert.False(response.StructuredContent.Value.TryGetProperty("result", out _));
+            });
             Assert.Empty(standardError);
         }
         finally
@@ -175,7 +184,7 @@ public sealed class McpStdioProtocolTests
         Assert.True(malformed.IsError);
         Assert.True(integerEnum.IsError);
         AssertStructuredSuccess(unknownArgument);
-        Assert.NotEqual(true, overLimit.IsError);
+        Assert.True(overLimit.IsError);
         Assert.Contains(
             overLimit.StructuredContent!.Value.GetProperty("errors").EnumerateArray(),
             error => error.GetProperty("code").GetString() == "invalid_line_count");

@@ -74,8 +74,8 @@ public sealed class McpLogTools
 
     public Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
         [Description("Configured folder/dashboard root ID; omit for the whole tree.")] string? rootGroupId = null,
-        [Description("Root-relative descendant depth, 0ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
-        [Description("Page nodes, 1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
+        [Description("Root-relative descendant depth, 0ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
+        [Description("Page nodes, 1ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
         [Description("Zero-based nextStartIndex; repeat rootGroupId/maxDepth. Compare returned catalogRevision across pages; on change discard prior discovery and restart at 0. The server does not enforce an expected revision.")] int startIndex = 0,
         CancellationToken cancellationToken = default)
         => _backend.ListLogTreeAsync(
@@ -101,6 +101,7 @@ public sealed class McpLogTools
         [Description("Include current-page performance counters; default false.")] bool includeStatistics = false,
         [Description("Query-wide text hit cap; may lower the effective maximum (normally 10,000; server_status). Repeat unchanged with cursors. countsOnly is unaffected.")] int? maxQueryHits = null,
         [Description("shared (default): table and file references; inline: per-file arrays.")] string provenanceMode = "shared",
+        [Description("Retain snapshot boundaries for an optional explicit monitor handoff; does not start observation.")] bool enableHandoff = false,
         [Description("Exclude matching lines using the same regex/case options; context remains surrounding source evidence.")] string? excludeQuery = null,
         [Description("today or last <positive integer><m|h|d>; frozen across continuation, exclusive of absolute bounds.")] string? relativeWindow = null,
         CancellationToken cancellationToken = default)
@@ -110,7 +111,7 @@ public sealed class McpLogTools
         var response = await _backend.SearchLogsAsync(
             new LogSearchQuery
             {
-                Targets = targets,
+                EnableHandoff = enableHandoff, Targets = targets,
                 Query = query, ExcludeQuery = excludeQuery, RelativeWindow = relativeWindow,
                 UseRegex = useRegex,
                 CaseSensitive = caseSensitive,
@@ -146,6 +147,7 @@ public sealed class McpLogTools
         [Description(McpResponseJsonPolicy.CountCursorDescription)] string? cursor = null,
         [Description("sparse (default): indexed counts and boundary grid; dense: timestamped buckets.")] string bucketMode = "sparse",
         [Description("shared (default): table and file references; inline: per-file arrays.")] string provenanceMode = "shared",
+        [Description("Retain snapshot boundaries for an optional explicit monitor handoff; does not start observation.")] bool enableHandoff = false,
         [Description("Exclude matching lines using the same regex/case options.")] string? excludeQuery = null,
         CancellationToken cancellationToken = default)
     {
@@ -156,7 +158,7 @@ public sealed class McpLogTools
         var response = await _backend.CountLogsAsync(
             new LogCountQuery
             {
-                Targets = targets,
+                EnableHandoff = enableHandoff, Targets = targets,
                 Query = query, ExcludeQuery = excludeQuery,
                 UseRegex = useRegex,
                 CaseSensitive = caseSensitive,
@@ -237,9 +239,11 @@ public sealed class McpLogTools
         [Description(StartTimestampDescription)] string? startTimestamp = null,
         [Description(EndTimestampDescription)] string? endTimestamp = null,
         [Description("today or last <positive integer><m|h|d>; fixed at observation creation, never sliding.")] string? relativeWindow = null,
-        [Description("Files checked per poll, 1–100; default 10. Round-robin position survives nonmatches and failures.")] int maxFiles = 10,
+        [Description("Files checked per poll, 1â€“100; default 10. Round-robin position survives nonmatches and failures.")] int maxFiles = 10,
         [Description("Total physical lines examined this poll; at most the server read-line maximum.")] int? maxLines = null,
         [Description("Bounded request deadline in milliseconds.")] int? timeoutMilliseconds = null,
+        [Description("Snapshot handoffCursor from enableHandoff=true; omit targets/predicates. Requires fully traversed verified boundaries; never fills gaps by rescanning.")] string? handoffCursor = null,
+        [Description("Optional observation duration, 1–86400000 ms; fixed at creation. Polls never wait for the period.")] int? observeForMilliseconds = null,
         [Description("Release the observation using its current cursor.")] bool release = false,
         [Description("shared (default) or inline provenance.")] string provenanceMode = "shared",
         CancellationToken cancellationToken = default)
@@ -248,7 +252,7 @@ public sealed class McpLogTools
             return McpResponseProjector.InvalidMode("provenanceMode", "shared, inline");
         var response = await _backend.MonitorLogsAsync(new LogMonitorQuery
         {
-            Targets = targets ?? [], Cursor = cursor, Query = query, ExcludeQuery = excludeQuery,
+            Targets = targets ?? [], Cursor = cursor, HandoffCursor = handoffCursor, ObserveForMilliseconds = observeForMilliseconds, Query = query, ExcludeQuery = excludeQuery,
             UseRegex = useRegex, CaseSensitive = caseSensitive, DateOffsetDays = dateOffsetDays,
             StartTimestamp = startTimestamp, EndTimestamp = endTimestamp, RelativeWindow = relativeWindow,
             MaxFiles = maxFiles, MaxLines = maxLines, TimeoutMilliseconds = timeoutMilliseconds, Release = release

@@ -13,9 +13,9 @@
 
 ## Resume checkpoint
 
-- Current milestone: M4, lifecycle and explicit handoff.
-- Next action: implement retained snapshot boundary export, opt-in handoff, lifecycle regression coverage and observation end conditions.
-- Completed implementation: none for this project.
+- Current milestone: M5, public choices and recovery.
+- Next action: enforce discovery revisions, finish tool-wide error projection, preferred operation/guidance, schema and recovery coverage.
+- Completed implementation: M1–M4; see milestone evidence and local commits.
 - Validation: M1 Core.Tests build and 2/2 characterization tests passed; see milestone evidence.
 - Active operations/blockers: none.
 - Local historical-plan cleanup is recorded separately in [PlanMaintenance2026-11-01.md](PlanMaintenance2026-11-01.md); archived instructions are historical evidence, not active work orders.
@@ -89,7 +89,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 - [x] M1 characterization and decisions.
 - [x] M2 common semantics and evidence.
 - [x] M3 bounded multi-file monitoring.
-- [ ] M4 lifecycle and explicit handoff.
+- [x] M4 lifecycle and explicit handoff.
 - [ ] M5 public simplification and recovery.
 - [ ] M6 final acceptance and delivery.
 
@@ -130,14 +130,14 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 
 ## M4 - Lifecycle consistency and explicit snapshot-to-monitor handoff
 
-- State: Not started. Dependencies: M3.
+- State: Complete. Dependencies: M3.
 - Apply the selected same-path lifecycle policy through shared events/state transitions where useful. Preserve caller-specific presentation and scheduling; do not route MCP through WPF sessions or indexes.
 - Handle file replacement, truncation, deletion/reappearance, encoding changes, and growth/removal of an unfinished matching line with attributable file/generation/line identity.
 - Implement opt-in handoff from a supported snapshot to monitoring using actual per-file boundaries. Support interrupted/partial input only when continuity can be established; otherwise return a clear, bounded error without a fresh scan fallback.
 - Keep handoff source state available for a documented bounded lifetime, including terminal snapshot handling. Distinguish transfer/replay/release semantics and avoid consuming the source inconsistently on retries.
 - Acceptance: controlled appends before/during/after handoff are delivered according to the selected boundary without unexplained gaps/duplicates; no file is treated as monitored unless it has a safe baseline; completed snapshot alone starts no observer; same-date replacements and terminal period conditions are explicit; cross-date following is rejected/deferred.
 - Validation: generation/truncation/encoding/unavailability/unfinished-line cases in backend and affected UI mode; handoff race, expiry, retry, cancellation and scope-change tests; WpfTestHost for all async WPF state observations; repeat deterministic concurrency coverage at least three times.
-- Evidence: pending.
+- Evidence: opt-in enableHandoff on search/count retains source checkpoints without starting observers; explicit monitor handoff copies fully traversed verified boundaries and frozen date/predicate/window. Unsafe partial sources reject without scanning. Source remains reusable until idle expiry; each source handoff creates an independent observer, while monitor cursor retries replay batches. New optional observation duration terminates polling explicitly. Last-line byte/CRLF/match evidence survives scanner buffer release. Twelve lifecycle/handoff tests passed three consecutive runs; Core.Tests 905/905 passed. WPF monitor tests 6/6 passed three times, including new WpfTestHost truncation-stop/no-rescan regression; no UI scheduling change was needed. Full service-safe LogReader.Tests passed 1496/1496 (InteractiveDesktop excluded). Real stdio tests now call seven tools and require structured rejection flags. Review extended predicate memory accounting and preserved source ownership through cancellation.
 
 ## M5 - Public choices, continuation, and recovery
 
@@ -220,7 +220,7 @@ See [McpToolConsistencyBacklog.md](McpToolConsistencyBacklog.md). Do not impleme
 
 ## Outcomes and retrospective
 
-Planning documents created. No runtime implementation or runtime validation has occurred under this plan. Replace this section with actual delivered behavior, commit/evidence references, validation outcomes and remaining risks at completion.
+M1–M4 implemented and validated in coherent local commits. Shared predicates/time/coverage, bounded multi-file monitoring and explicit snapshot handoff are delivered. Public recovery/schema consolidation and final measurement/documentation acceptance remain in M5–M6; final completion is not yet claimed.
 
 ## Handoff history
 

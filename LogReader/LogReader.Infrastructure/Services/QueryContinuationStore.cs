@@ -21,8 +21,15 @@ internal sealed class QueryContinuationStore : IDisposable
         _now = now;
     }
 
-    public async Task<Lease> AcquireAsync(string? cursor, string operation, string fingerprint,
+    public Task<Lease> AcquireAsync(string? cursor, string operation, string fingerprint,
         string catalogRevision, CancellationToken ct)
+        => AcquireCoreAsync(cursor, operation, fingerprint, catalogRevision, ct, export: false);
+
+    public Task<Lease> AcquireSnapshotAsync(string cursor, string catalogRevision, CancellationToken ct)
+        => AcquireCoreAsync(cursor, "", "", catalogRevision, ct, export: true);
+
+    private async Task<Lease> AcquireCoreAsync(string? cursor, string operation, string fingerprint,
+        string catalogRevision, CancellationToken ct, bool export)
     {
         var token = cursor == null ? null : Decode(cursor);
         Session session;
@@ -48,13 +55,13 @@ internal sealed class QueryContinuationStore : IDisposable
             }
             else
             {
-                if (token.Operation != operation)
+                if (export ? token.Operation is not ("search" or "count") : token.Operation != operation)
                     throw new ContinuationException("mismatched_query_cursor");
                 if (!_sessions.TryGetValue(token.SessionId, out session!))
                     throw new ContinuationException("expired_query_cursor");
                 if (session.CatalogRevision != catalogRevision)
                     throw new ContinuationException("stale_query_cursor");
-                if (session.Fingerprint != fingerprint)
+                if (!export && session.Fingerprint != fingerprint)
                     throw new ContinuationException("mismatched_query_cursor");
             }
             session.Users++;
@@ -75,8 +82,8 @@ internal sealed class QueryContinuationStore : IDisposable
             lock (_gate)
             {
                 var revision = token?.Revision ?? 0;
-                var replay = revision == session.Revision - 1 && session.LastResult != null;
-                if (!replay && (revision != session.Revision || session.Terminal))
+                var replay = !export && revision == session.Revision - 1 && session.LastResult != null;
+                if (!replay && (revision != session.Revision || session.Terminal && !export))
                     throw new ContinuationException("stale_query_cursor");
                 // Clone capacity plus two decoded lines, growth-copy buffers and bounded response scratch.
                 var workingReservation = McpContinuationLimits.GetWorkingReservationBytes(_limits);
@@ -144,7 +151,7 @@ internal sealed class QueryContinuationStore : IDisposable
         lock (_gate)
         {
             session.Users--;
-            if (removeEmpty && (session.State == null || session.Terminal && session.Revision == 1) && session.Users == 0)
+            if (removeEmpty && (session.State == null || session.Terminal && !session.RetainTerminal && session.Revision == 1) && session.Users == 0)
                 _sessions.Remove(session.Id);
         }
     }
@@ -176,6 +183,7 @@ internal sealed class QueryContinuationStore : IDisposable
         public object? State { get; set; }
         public object? LastResult { get; set; }
         public bool Terminal { get; set; }
+        public bool RetainTerminal { get; set; }
     }
 
     internal sealed class Lease : IDisposable
@@ -200,7 +208,7 @@ internal sealed class QueryContinuationStore : IDisposable
         public object? ReplayResult => _session.LastResult;
         public string NextCursor => _owner.Encode(_session, checked(_session.Revision + 1));
 
-        public void Commit(object state, object result, long bytes, bool terminal)
+        public void Commit(object state, object result, long bytes, bool terminal, bool retainTerminal = false)
         {
             lock (_owner._gate)
             {
@@ -213,6 +221,7 @@ internal sealed class QueryContinuationStore : IDisposable
                 _session.LastResult = result;
                 _session.Bytes = bytes;
                 _session.Terminal = terminal;
+                _session.RetainTerminal = retainTerminal;
                 _session.Revision++;
                 _session.LastUsed = _owner._now();
             }

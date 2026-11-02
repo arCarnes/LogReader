@@ -19,7 +19,7 @@ public sealed partial class HeadlessLogQueryBackend
 
         return await RunResumableAsync<LogCountResult>(new LogSearchQuery
         {
-            Targets = request.Targets, Query = request.Query, UseRegex = request.UseRegex,
+            EnableHandoff = request.EnableHandoff, Targets = request.Targets, Query = request.Query, UseRegex = request.UseRegex,
             ExcludeQuery = request.ExcludeQuery, CaseSensitive = request.CaseSensitive, DateOffsetDays = request.DateOffsetDays,
             ResultMode = "countsOnly", TimeoutMilliseconds = request.TimeoutMilliseconds
         }, request, _limits.MaximumFiles, 0, 0, ct).ConfigureAwait(false);

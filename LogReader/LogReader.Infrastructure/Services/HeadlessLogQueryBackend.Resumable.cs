@@ -34,7 +34,7 @@ public sealed partial class HeadlessLogQueryBackend
             ? CreateSearchRequestFingerprint(search, fileLimit, hitsPerFile, totalHits)
             : Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
             {
-                count.Targets, count.Query, count.ExcludeQuery, count.UseRegex, count.CaseSensitive, count.DateOffsetDays,
+                count.EnableHandoff, count.Targets, count.Query, count.ExcludeQuery, count.UseRegex, count.CaseSensitive, count.DateOffsetDays,
                 count.StartTimestamp, count.EndTimestamp, count.RelativeWindow, count.BucketSize
             })));
         _queryOperationMetrics.Value = new QueryOperationMetrics();
@@ -54,7 +54,7 @@ public sealed partial class HeadlessLogQueryBackend
 
             var state = transaction.State is QueryTraversal previous ? previous.Clone() : new QueryTraversal
             {
-                ReferenceDate = _today()
+                ReferenceDate = _today(), DateOffsetDays = search.DateOffsetDays
             };
             if (state.CountTime == null)
             {
@@ -78,6 +78,7 @@ public sealed partial class HeadlessLogQueryBackend
                 maxRetainedLineTextLength: _limits.MaximumCharactersPerLine,
                 timestampAggregation: state.CountTime?.AggregationPlan);
             request.ExcludeQuery = search.ExcludeQuery;
+            state.Predicate = request.Clone();
             var scanner = _scanner;
             var regex = scanner.PrepareRegex(request);
             var page = new TraversalPage(_limits.MaximumResponseCharacters);
@@ -335,14 +336,15 @@ public sealed partial class HeadlessLogQueryBackend
             var nextCursor = traversalComplete || queryHitLimitReached ? null : transaction.NextCursor;
             object result = count == null
                 ? BuildResumableSearch(requestId, catalog.Snapshot.Revision, state, page, search, nextCursor,
-                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline)
+                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline, search.EnableHandoff ? transaction.NextCursor : null)
                 : BuildResumableCount(requestId, catalog.Snapshot.Revision, state, page, nextCursor,
-                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline);
+                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline, count.EnableHandoff ? transaction.NextCursor : null);
             foreach (var file in page.Files.Keys.Where(static file => file.Done))
                 file.Reported = true;
             EnsureTraversalCapacity(state);
             var bytes = state.RetainedBytes + JsonSerializer.SerializeToUtf8Bytes(result).LongLength * 3 + 4096;
-            transaction.Commit(state, result, bytes, traversalComplete || queryHitLimitReached);
+            transaction.Commit(state, result, bytes, traversalComplete || queryHitLimitReached,
+                retainTerminal: count?.EnableHandoff ?? search.EnableHandoff);
             return (LogOperationEnvelope<T>)result;
         }
         catch (ContinuationException ex)
@@ -397,7 +399,7 @@ public sealed partial class HeadlessLogQueryBackend
 
     private LogOperationEnvelope<LogSearchResult> BuildResumableSearch(string requestId, string revision,
         QueryTraversal state, TraversalPage page, LogSearchQuery query, string? nextCursor, string stopReason,
-        long elapsed, bool deadline)
+        long elapsed, bool deadline, string? handoffCursor = null)
     {
         var provenanceBudget = new ResponseCharacterBudget(_limits.MaximumResponseCharacters / 4);
         var contextBudget = new ResponseCharacterBudget(page.HitBudget.Remaining);
@@ -458,7 +460,7 @@ public sealed partial class HeadlessLogQueryBackend
             reasonsAll = reasonsAll.Add("query_hit_limit");
         var result = new LogSearchResult
         {
-            TimestampCoverage = Coverage(state), ResolvedTimeRange = state.CountTime?.ResolvedRange,
+            HandoffCursor = handoffCursor, TimestampCoverage = Coverage(state), ResolvedTimeRange = state.CountTime?.ResolvedRange,
             ResultMode = query.ResultMode, Files = files.ToImmutable(), PageOmittedZeroHitFileCount = omitted,
             SelectedFileCount = state.SelectedFiles, SearchedFileCount = state.Files.Count(static file => file.Started),
             ReturnedHitCount = page.Hits, QueryReturnedHitCount = state.ReturnedHits,
@@ -490,7 +492,7 @@ public sealed partial class HeadlessLogQueryBackend
     }
 
     private LogOperationEnvelope<LogCountResult> BuildResumableCount(string requestId, string revision,
-        QueryTraversal state, TraversalPage page, string? nextCursor, string stopReason, long elapsed, bool deadline)
+        QueryTraversal state, TraversalPage page, string? nextCursor, string stopReason, long elapsed, bool deadline, string? handoffCursor = null)
     {
         var time = state.CountTime!;
         var bucketCounts = new Dictionary<int, SearchTimestampBucketCount>();
@@ -540,7 +542,7 @@ public sealed partial class HeadlessLogQueryBackend
         var traversalComplete = state.ResolverFinished && state.Files.All(static file => file.Done);
         var result = new LogCountResult
         {
-            TimestampCoverage = Coverage(state),
+            HandoffCursor = handoffCursor, TimestampCoverage = Coverage(state),
             MatchingLineCount = state.Files.Sum(static file => file.Total.MatchingLineCount),
             MatchOccurrenceCount = state.Files.Sum(static file => file.Total.MatchOccurrenceCount),
             UnbucketedMatchingLineCount = state.Files.Sum(static file => file.Total.UnbucketedMatchingLineCount),
@@ -621,6 +623,8 @@ public sealed partial class HeadlessLogQueryBackend
     private sealed class QueryTraversal
     {
         public DateOnly ReferenceDate;
+        public int DateOffsetDays;
+        public SearchRequest? Predicate;
         public CountTimeResolution? CountTime;
         public ConfiguredLogSelectionContinuation? Resolver;
         public bool ResolverFinished;
@@ -631,12 +635,13 @@ public sealed partial class HeadlessLogQueryBackend
         public List<TraversalFile> Files = [];
         public QueryTraversal Clone() => new()
         {
-            ReferenceDate = ReferenceDate, CountTime = CountTime, Resolver = Resolver,
+            ReferenceDate = ReferenceDate, DateOffsetDays = DateOffsetDays, Predicate = Predicate, CountTime = CountTime, Resolver = Resolver,
             ResolverFinished = ResolverFinished, SelectedFiles = SelectedFiles, RemainingCandidates = RemainingCandidates,
             NextFileIndex = NextFileIndex, ReturnedHits = ReturnedHits,
             Files = Files.Select(static file => file.Clone()).ToList()
         };
-        public long RetainedBytes => 1024 + Files.Sum(static file => file.RetainedBytes) +
+        public long RetainedBytes => 1024 + ((Predicate?.Query.Length ?? 0) + (Predicate?.ExcludeQuery?.Length ?? 0) +
+            (Predicate?.FromTimestamp?.Length ?? 0) + (Predicate?.ToTimestamp?.Length ?? 0)) * 2L + Files.Sum(static file => file.RetainedBytes) +
             (Resolver?.SeenPhysicalPathIdentities.Length ?? 0) * 128L;
     }
 

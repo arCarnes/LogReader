@@ -6,6 +6,8 @@ public sealed class LogMonitorQuery
 {
     public IReadOnlyList<ConfiguredLogTarget> Targets { get; init; } = [];
     public string? Cursor { get; init; }
+    public string? HandoffCursor { get; init; }
+    public int? ObserveForMilliseconds { get; init; }
     public string? Query { get; init; }
     public string? ExcludeQuery { get; init; }
     public bool UseRegex { get; init; }
@@ -25,6 +27,7 @@ public sealed class LogMonitorResult
     public int ContractVersion { get; init; } = 1;
     public string? NextCursor { get; init; }
     public string State { get; init; } = "observing";
+    public string? ObservationEndsAt { get; init; }
     public string SelectedDate { get; init; } = string.Empty;
     public int SelectedFileCount { get; init; }
     public int CheckedFileCount { get; init; }

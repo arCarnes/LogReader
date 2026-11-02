@@ -833,7 +833,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         var canonical = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
         {
             Targets = request.Targets.Select(target => new { Kind = (int)target.Kind, target.Id }).ToArray(),
-            request.Query, request.ExcludeQuery, RelativeWindow = NormalizeFingerprintText(request.RelativeWindow),
+            request.EnableHandoff, request.Query, request.ExcludeQuery, RelativeWindow = NormalizeFingerprintText(request.RelativeWindow),
             request.UseRegex,
             request.CaseSensitive,
             request.ResultMode,
