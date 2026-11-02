@@ -11,7 +11,6 @@ Improve UNC file loading, searches and bounded MCP monitoring by avoiding an unn
 | [Design](Design.md) | Behavior, architecture, compatibility decisions and deferred work. |
 | [Execution plan](ExecutionPlan.md) | Phase status, next action, work boundaries, commits and completion evidence. |
 | [Validation and measurements](ValidationAndMeasurements.md) | Required regression scenarios, commands, benchmark method and historical evidence. |
-| [Goal prompt](GoalPrompt.md) | Copyable request to execute or resume this package. |
 
 Current user instructions and the applicable repository `AGENTS.md` take precedence. The execution plan owns progress; the design owns technical decisions; the validation document owns acceptance evidence. Update linked documents together when an implementation finding requires a change. Historical plans and measurements do not authorize additional work.
 
