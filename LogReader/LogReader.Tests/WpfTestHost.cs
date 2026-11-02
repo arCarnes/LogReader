@@ -151,6 +151,10 @@ internal static class WpfTestHost
         }
     }
 
+    // Cleanup remains owned by this host. Reuse fails closed if draining times out.
+    public static Task DrainOwnedWorkAsync(Task ownedWork)
+        => Lifetime.DrainAsync(ownedWork, Task.CompletedTask);
+
     public static void ShowHidden(Window window)
     {
         ArgumentNullException.ThrowIfNull(window);
