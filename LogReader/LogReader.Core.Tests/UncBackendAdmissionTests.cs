@@ -15,7 +15,8 @@ public sealed partial class HeadlessLogQueryBackendTests
         var search = new ScriptedLogScanner((path, _, _, _) => Task.FromResult(Result(path, "hit")));
         using var backend = CreateBackend(CreateSnapshot(
             ("one", @"\\host\share\one"), ("two", @"\\HOST\SHARE\two"), ("third", @"\\host\share\third")),
-            scanner: search, cache: cache, pathExists: gate.Probe, encodingDetection: encoding);
+            scanner: search, cache: cache, pathExists: gate.Probe, encodingDetection: encoding,
+            limits: LogQueryEffectiveLimits.Default with { MaximumConcurrentDiskOperations = 1 });
         using var cancellation = new CancellationTokenSource();
         var requests = new[] { "one", "two" }.Select(id => Task.Run(() => backend.SearchLogsAsync(
             Search(id, "needle", ConfiguredLogTargetKind.LogFile), cancellation.Token))).ToArray();
@@ -47,6 +48,110 @@ public sealed partial class HeadlessLogQueryBackendTests
         }
         Assert.Equal(0, gate.Active);
         Assert.Equal(1, gate.Peak);
+    }
+
+    [Fact]
+    public async Task SearchLogs_TwoRequestsShareFourUncSlotsAndRetainTwoHeavyRequests()
+    {
+        var uncPaths = Enumerable.Range(0, 4).Select(i => $@"\\host\share\file-{i}").ToArray();
+        var gate = new AdmissionWorkGate(4);
+        var thirdStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        const string thirdPath = @"\\other-host\share\third";
+        var scanner = new ScriptedLogScanner((path, _, _, ct) =>
+        {
+            if (path != thirdPath) return gate.ScanAsync(path, ct);
+            thirdStarted.TrySetResult();
+            return Task.FromResult(Result(path, "third"));
+        });
+        using var backend = CreateBackend(CreateSnapshot(uncPaths.Select((path, i) => ($"file-{i}", path))
+            .Append(("third", thirdPath)).ToArray()), scanner: scanner, pathExists: _ => false,
+            encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
+        var query = new LogSearchQuery
+        {
+            Targets = Enumerable.Range(0, 4).Select(i => new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, $"file-{i}")).ToArray(),
+            Query = "needle"
+        };
+        var requests = new[] { backend.SearchLogsAsync(query), backend.SearchLogsAsync(query) };
+        Task<LogOperationEnvelope<LogSearchResult>>? third = null;
+        try
+        {
+            await gate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(4, gate.Active);
+            third = backend.SearchLogsAsync(Search("third", "needle", ConfiguredLogTargetKind.LogFile));
+            Assert.False(thirdStarted.Task.IsCompleted);
+            Assert.Equal(8, LogQueryEffectiveLimits.Default.MaximumConcurrentDiskOperations);
+        }
+        finally
+        {
+            gate.Release();
+            await Task.WhenAll(requests).WaitAsync(TimeSpan.FromSeconds(5));
+            if (third != null) await third.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.All(await Task.WhenAll(requests), response =>
+        {
+            Assert.Empty(response.Errors);
+            Assert.Equal(uncPaths.Length, response.Result!.Files.Length);
+            Assert.Equal(2, response.Result.Statistics.PeakConcurrentUncOperations);
+        });
+        Assert.True(thirdStarted.Task.IsCompletedSuccessfully);
+        Assert.Equal(4, gate.Peak);
+        Assert.Equal(0, gate.Active);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelledDefaultUncProbes_RetainFourHostSlotsUntilOsWorkReturns(bool lateFault)
+    {
+        const string blockedPath = @"\\host\share\blocked";
+        using var entered = new SemaphoreSlim(0);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var cache = CreateCache();
+        var scanner = new ScriptedLogScanner((path, _, _, _) => Task.FromResult(Result(path, "hit")));
+        using var backend = CreateBackend(CreateSnapshot(("blocked", blockedPath), ("other", @"\\other-host\share\file")),
+            scanner: scanner, cache: cache, encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8),
+            pathExists: path =>
+            {
+                if (path != blockedPath) return false;
+                Interlocked.Increment(ref calls);
+                entered.Release();
+                release.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                if (lateFault) throw new IOException("Controlled late probe failure.");
+                return false;
+            });
+        using var cleanupCancellation = new CancellationTokenSource();
+        var requests = new List<Task<LogOperationEnvelope<LogSearchResult>>>();
+        try
+        {
+            for (var i = 0; i < 4; i++)
+            {
+                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cleanupCancellation.Token);
+                var request = Task.Run(() => backend.SearchLogsAsync(Search("blocked", "needle", ConfiguredLogTargetKind.LogFile), cancellation.Token));
+                requests.Add(request);
+                Assert.True(await entered.WaitAsync(TimeSpan.FromSeconds(5)));
+                cancellation.Cancel();
+                Assert.Equal("request_cancelled", Assert.Single((await request.WaitAsync(TimeSpan.FromSeconds(5))).Errors).Code);
+            }
+            var queued = backend.SearchLogsAsync(Search("blocked", "needle", ConfiguredLogTargetKind.LogFile, timeoutMilliseconds: 100), cleanupCancellation.Token);
+            requests.Add(queued);
+            Assert.Equal("deadline_exceeded", Assert.Single((await queued.WaitAsync(TimeSpan.FromSeconds(5))).Errors).Code);
+            Assert.Equal(4, Volatile.Read(ref calls));
+            Assert.Equal(0, scanner.CallCount);
+            var other = backend.SearchLogsAsync(Search("other", "needle", ConfiguredLogTargetKind.LogFile), cleanupCancellation.Token);
+            requests.Add(other);
+            Assert.Empty((await other.WaitAsync(TimeSpan.FromSeconds(5))).Errors);
+            backend.Dispose();
+            using (cache.AcquireSession(Path.Combine(_testDirectory, "still-owned-four.log"))) { }
+        }
+        finally
+        {
+            cleanupCancellation.Cancel();
+            release.TrySetResult();
+            await Task.WhenAll(requests).WaitAsync(TimeSpan.FromSeconds(5));
+            backend.Dispose();
+            await AssertCacheDisposedAsync(cache);
+        }
     }
 
     private sealed class AdmissionWorkGate(int expected, bool lateFault = false)

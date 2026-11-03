@@ -447,7 +447,7 @@ public sealed record LogQueryEffectiveLimits(
         200,
         1_000,
         800_000,
-        2,
+        8,
         30_000,
         4,
         2_000_000,
