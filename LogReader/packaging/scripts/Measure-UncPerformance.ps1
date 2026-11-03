@@ -11,10 +11,14 @@ param(
     [string]$Workflow = 'Components',
     [string]$McpExecutable,
     [string]$CandidateMcpExecutable,
-    [switch]$IncludeUnc
+    [switch]$IncludeUnc,
+    [switch]$AllowDiskConcurrencyChange
 )
 
 $ErrorActionPreference = 'Stop'
+if ($AllowDiskConcurrencyChange -and ($Mode -ne 'Compare' -or $Workflow -ne 'Mcp')) {
+    throw 'AllowDiskConcurrencyChange applies only to MCP comparisons.'
+}
 if ($RunId -notmatch '^[a-zA-Z0-9-]+$' -or ($FixtureId -and $FixtureId -notmatch '^[a-zA-Z0-9-]+$')) {
     throw 'Run and fixture IDs must contain only letters, digits and hyphens.'
 }
@@ -109,9 +113,17 @@ for ($session = 1; $session -le 2; $session++) {
             if ($Workflow -eq 'Ui' -and $reports.A.measurementRecipe -cne $reports.B.measurementRecipe) {
                 throw 'UI measurement recipes differ between paired variants.'
             }
-            if ($Workflow -eq 'Mcp' -and ($reports.A.toolSchemaSha256 -cne $reports.B.toolSchemaSha256 -or
-                ($reports.A.limits | ConvertTo-Json -Depth 10 -Compress) -cne ($reports.B.limits | ConvertTo-Json -Depth 10 -Compress))) {
-                throw 'MCP public schemas or effective limits changed between paired variants.'
+            if ($Workflow -eq 'Mcp') {
+                $baselineLimits = $reports.A.limits | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+                $candidateLimits = $reports.B.limits | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+                if ($AllowDiskConcurrencyChange) {
+                    # Raw reports retain both actual values; all other limits must still match.
+                    $candidateLimits.maximumConcurrentDiskOperations = $baselineLimits.maximumConcurrentDiskOperations
+                }
+                if ($reports.A.toolSchemaSha256 -cne $reports.B.toolSchemaSha256 -or
+                    ($baselineLimits | ConvertTo-Json -Depth 10 -Compress) -cne ($candidateLimits | ConvertTo-Json -Depth 10 -Compress)) {
+                    throw 'MCP public schemas or unapproved effective limits changed between paired variants.'
+                }
             }
             if ($reports.A.manifestHash -cne $reports.B.manifestHash -or @($reports.A.samples).Count -ne @($reports.B.samples).Count) {
                 throw 'Paired reports used different fixtures or scenario counts.'
@@ -152,7 +164,7 @@ $summary = @($rows | Group-Object { "$($_.session)|$($_.sample.Fixture)|$($_.sam
     }
 })
 Write-Json (Join-Path $runRoot 'summary.json') ([ordered]@{
-    schemaVersion = 1; mode = $Mode; workflow = $Workflow; cache = 'warm/cache-uncontrolled'; sessions = 2; pairsPerSession = 7
+    schemaVersion = 1; mode = $Mode; workflow = $Workflow; allowDiskConcurrencyChange = [bool]$AllowDiskConcurrencyChange; cache = 'warm/cache-uncontrolled'; sessions = 2; pairsPerSession = 7
     processSamples = $processSamples
     note = 'Workflow is recorded explicitly. Candidate acceptance also requires protected workflows, ownership/resource and desktop checks.'
     summary = $summary

@@ -202,6 +202,12 @@ internal static class AdaptiveParallelismPolicy
 
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 
+    internal static (ParallelismGroupKind Kind, string Key, string? ShareKey) GetTopology(string path)
+    {
+        var target = Classify(path);
+        return (target.TopLevelKind, target.TopLevelKey, target.ShareKey);
+    }
+
     private static TargetClassification Classify(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))

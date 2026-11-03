@@ -1697,7 +1697,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     {
         string[] uncPaths = [@"\\server\share-a\first.log", @"\\server\share-b\second.log", @"\\server\share-c\third.log"];
         var local = await CreateFileAsync("local-interleave.log", "local");
-        var gate = new AdmissionWorkGate(1);
+        var gate = new AdmissionWorkGate(2);
         var localStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var search = new ScriptedLogScanner(async (path, _, _, ct) =>
         {
@@ -1723,8 +1723,8 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             await gate.Started.WaitAsync(TimeSpan.FromSeconds(2));
             localTask = backend.SearchLogsAsync(Search("local", "ignored", ConfiguredLogTargetKind.LogFile));
             await localStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-            Assert.Equal(1, gate.Active);
-            Assert.Equal(1, gate.Calls); // The second lookahead file waits for shared UNC admission.
+            Assert.Equal(2, gate.Active);
+            Assert.Equal(2, gate.Calls); // Both lookahead files are admitted without blocking local work.
         }
         finally
         {
@@ -1735,8 +1735,8 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var response = await uncTask;
         Assert.Empty(response.Errors);
         Assert.Equal(new[] { "first", "second", "third" }, response.Result!.Files.Select(file => file.FileId));
-        Assert.Equal(1, response.Result.Statistics.PeakConcurrentDiskOperations);
-        Assert.Equal(1, response.Result.Statistics.PeakConcurrentUncOperations);
+        Assert.Equal(2, response.Result.Statistics.PeakConcurrentDiskOperations);
+        Assert.Equal(2, response.Result.Statistics.PeakConcurrentUncOperations);
         Assert.Equal("local", Assert.Single((await localTask!).Result!.Files).FileId);
         Assert.Equal(0, gate.Active);
     }
@@ -1771,10 +1771,10 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
-    public async Task SearchLogs_UncConcurrencyPreservesSingleUncLimit(int limit)
+    public async Task SearchLogs_UncConcurrencyHonorsExplicitLimitAndTwoFileLookahead(int limit)
     {
         var paths = Enumerable.Range(0, 3).Select(index => $@"\\server\share\log-{index}.log").ToArray();
-        var gate = new AdmissionWorkGate(1);
+        var gate = new AdmissionWorkGate(Math.Min(2, limit));
         var search = new ScriptedLogScanner((path, _, _, ct) => gate.ScanAsync(path, ct));
         using var backend = CreateBackend(
             CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()), scanner: search,
@@ -1784,7 +1784,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         try
         {
             await gate.Started.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.Equal(1, gate.Active);
+            Assert.Equal(Math.Min(2, limit), gate.Active);
         }
         finally
         {
@@ -1793,21 +1793,22 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         }
         var response = await work;
         Assert.Empty(response.Errors);
-        Assert.Equal(1, gate.Peak);
-        Assert.Equal(1, response.Result!.Statistics.PeakConcurrentDiskOperations);
-        Assert.Equal(1, response.Result.Statistics.PeakConcurrentUncOperations);
+        Assert.Equal(Math.Min(2, limit), gate.Peak);
+        Assert.Equal(Math.Min(2, limit), response.Result!.Statistics.PeakConcurrentDiskOperations);
+        Assert.Equal(Math.Min(2, limit), response.Result.Statistics.PeakConcurrentUncOperations);
         Assert.Equal(0, gate.Active);
     }
 
     [Fact]
-    public async Task SearchLogs_UncCandidateProbesShareSingleUncAdmission()
+    public async Task SearchLogs_UncCandidateProbesShareExplicitSingleAdmission()
     {
         var paths = Enumerable.Range(0, 3).Select(index => $@"\\server\share\probe-{index}.log").ToArray();
         var gate = new AdmissionWorkGate(1);
         var search = new ScriptedLogScanner((path, _, _, _) => Task.FromResult(Result(path, "hit")));
         using var backend = CreateBackend(
             CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
-            scanner: search, pathExists: gate.Probe, encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
+            scanner: search, pathExists: gate.Probe, encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8),
+            limits: LogQueryEffectiveLimits.Default with { MaximumConcurrentDiskOperations = 1 });
         var requests = Enumerable.Range(0, 2)
             .Select(_ => Task.Run(() => backend.SearchLogsAsync(Search("dashboard", "ignored")))).ToArray();
         try

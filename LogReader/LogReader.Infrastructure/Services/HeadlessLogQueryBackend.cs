@@ -26,8 +26,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
     private readonly Func<long>? _scanTimestamp;
     private readonly Func<string, bool> _pathExists;
     private readonly SemaphoreSlim _heavyRequestGate;
-    private readonly SemaphoreSlim _diskOperationGate;
-    private readonly SemaphoreSlim _uncOperationGate = new(1, 1);
+    private readonly QueryDiskAdmission _diskAdmission;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly object _lifetimeGate = new();
     private readonly AsyncLocal<QueryOperationMetrics?> _queryOperationMetrics = new();
@@ -93,8 +92,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 cache.WarmRetentionDuration.TotalMilliseconds))
         };
         ValidateLimits(_limits);
-        _heavyRequestGate = new SemaphoreSlim(_limits.MaximumConcurrentDiskOperations);
-        _diskOperationGate = new SemaphoreSlim(_limits.MaximumConcurrentDiskOperations);
+        _heavyRequestGate = new SemaphoreSlim(Math.Min(2, _limits.MaximumConcurrentDiskOperations));
+        _diskAdmission = new QueryDiskAdmission(_limits.MaximumConcurrentDiskOperations);
     }
 
     public async Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
@@ -603,65 +602,21 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         Func<CancellationToken, Task<T>> operation,
         CancellationToken ct)
     {
-        var isUnc = IsUncPath(filePath);
-        var uncAcquired = false;
-        var diskAcquired = false;
-        var tracked = false;
-        try
-        {
-            if (isUnc)
-            {
-                await _uncOperationGate.WaitAsync(ct).ConfigureAwait(false);
-                uncAcquired = true;
-            }
-
-            await _diskOperationGate.WaitAsync(ct).ConfigureAwait(false);
-            diskAcquired = true;
-            RecordOperationStarted(isUnc);
-            tracked = true;
-
-            return await operation(ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            if (tracked)
-                RecordOperationCompleted(isUnc);
-            if (diskAcquired)
-                _diskOperationGate.Release();
-            if (uncAcquired)
-                _uncOperationGate.Release();
-        }
+        using var admission = await AcquireDiskOperationAsync(filePath, ct).ConfigureAwait(false);
+        return await operation(ct).ConfigureAwait(false);
     }
 
-    private async ValueTask<IDisposable> AcquireDiskOperationAsync(
-        string filePath,
-        CancellationToken ct)
+    private async ValueTask<IDisposable> AcquireDiskOperationAsync(string filePath, CancellationToken ct)
     {
+        var admission = await _diskAdmission.AcquireAsync(filePath, ct).ConfigureAwait(false);
         var isUnc = IsUncPath(filePath);
-        var uncAcquired = false;
-        var diskAcquired = false;
-        try
+        var metrics = _queryOperationMetrics.Value;
+        metrics?.RecordStarted(isUnc);
+        return new DiskOperationLease(() =>
         {
-            if (isUnc)
-            {
-                await _uncOperationGate.WaitAsync(ct).ConfigureAwait(false);
-                uncAcquired = true;
-            }
-
-            await _diskOperationGate.WaitAsync(ct).ConfigureAwait(false);
-            diskAcquired = true;
-            RecordOperationStarted(isUnc);
-
-            return new DiskOperationLease(() => ReleaseOperation(isUnc));
-        }
-        catch
-        {
-            if (diskAcquired)
-                _diskOperationGate.Release();
-            if (uncAcquired)
-                _uncOperationGate.Release();
-            throw;
-        }
+            metrics?.RecordCompleted(isUnc);
+            admission.Dispose();
+        });
     }
 
     private bool ProbePathExists(string filePath, CancellationToken ct)
@@ -669,89 +624,36 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
 
     private async Task<bool> ProbePathExistsAsync(string filePath, CancellationToken ct)
     {
-        var isUnc = IsUncPath(filePath);
-        var diskAcquired = false;
-        var uncAcquired = false;
-        var tracked = false;
+        IDisposable? admission = await AcquireDiskOperationAsync(filePath, ct).ConfigureAwait(false);
         try
         {
-            if (isUnc)
-            {
-                await _uncOperationGate.WaitAsync(ct).ConfigureAwait(false);
-                uncAcquired = true;
-            }
-
-            await _diskOperationGate.WaitAsync(ct).ConfigureAwait(false);
-            diskAcquired = true;
-            RecordOperationStarted(isUnc);
-            tracked = true;
-
             ct.ThrowIfCancellationRequested();
             var detachedLease = BeginDetachedWork();
             Task<bool> probeTask;
-            try
-            {
-                probeTask = Task.Run(() => _pathExists(filePath));
-            }
+            try { probeTask = Task.Run(() => _pathExists(filePath)); }
             catch
             {
                 detachedLease.Dispose();
                 throw;
             }
-
-            var completion = CompleteDetachedPathProbeAsync(
-                probeTask,
-                detachedLease,
-                isUnc);
+            var completion = CompleteDetachedPathProbeAsync(probeTask, detachedLease, admission);
+            // The actual OS operation, rather than the caller's cancellation, owns capacity.
+            admission = null;
             ObserveDetachedFault(completion);
-            diskAcquired = false;
-            uncAcquired = false;
-            tracked = false;
             return await completion.WaitAsync(ct).ConfigureAwait(false);
         }
-        finally
-        {
-            if (tracked)
-                RecordOperationCompleted(isUnc);
-            if (diskAcquired)
-                _diskOperationGate.Release();
-            if (uncAcquired)
-                _uncOperationGate.Release();
-        }
+        finally { admission?.Dispose(); }
     }
 
-    private async Task<bool> CompleteDetachedPathProbeAsync(
-        Task<bool> probeTask,
-        RequestLease detachedLease,
-        bool isUnc)
+    private static async Task<bool> CompleteDetachedPathProbeAsync(
+        Task<bool> probeTask, RequestLease detachedLease, IDisposable admission)
     {
-        try
-        {
-            return await probeTask.ConfigureAwait(false);
-        }
+        try { return await probeTask.ConfigureAwait(false); }
         finally
         {
-            ReleaseOperation(isUnc);
+            admission.Dispose();
             detachedLease.Dispose();
         }
-    }
-
-    private void RecordOperationStarted(bool isUnc)
-    {
-        _queryOperationMetrics.Value?.RecordStarted(isUnc);
-    }
-
-    private void RecordOperationCompleted(bool isUnc)
-    {
-        _queryOperationMetrics.Value?.RecordCompleted(isUnc);
-    }
-
-    private void ReleaseOperation(bool isUnc)
-    {
-        RecordOperationCompleted(isUnc);
-        _diskOperationGate.Release();
-        if (isUnc)
-            _uncOperationGate.Release();
     }
 
     private static void UpdatePeak(ref int peak, int value)
@@ -1483,8 +1385,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         _continuations?.Dispose();
         _indexedSessions.Dispose();
         _heavyRequestGate.Dispose();
-        _diskOperationGate.Dispose();
-        _uncOperationGate.Dispose();
+        _diskAdmission.Dispose();
         _lifetimeCancellation.Dispose();
     }
 

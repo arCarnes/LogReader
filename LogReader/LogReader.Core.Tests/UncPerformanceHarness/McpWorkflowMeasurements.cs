@@ -132,8 +132,9 @@ internal static partial class McpWorkflowMeasurements
             throw new InvalidOperationException("MCP tool surface changed.");
         var status = await client.CallAsync("server_status", new { }, ct);
         var limits = status.Result.GetProperty("queryBackend").GetProperty("limits").Clone();
-        if (limits.GetProperty("maximumConcurrentDiskOperations").GetInt32() != 2)
-            throw new InvalidOperationException("MCP default disk cap changed.");
+        var maximumDiskOperations = limits.GetProperty("maximumConcurrentDiskOperations").GetInt32();
+        if (maximumDiskOperations is < 1 or > 8)
+            throw new InvalidOperationException("Unsupported MCP disk cap for this measurement recipe.");
 
         foreach (var scope in scopes)
         {
@@ -220,7 +221,7 @@ internal static partial class McpWorkflowMeasurements
                     peakDisk = Math.Max(peakDisk, stats.GetProperty("peakConcurrentDiskOperations").GetInt32());
                     peakUnc = Math.Max(peakUnc, stats.GetProperty("peakConcurrentUncOperations").GetInt32());
                 }
-                if (peakDisk > 2 || peakUnc > 2) throw new InvalidOperationException("MCP disk budget exceeded.");
+                if (peakDisk > maximumDiskOperations || peakUnc > maximumDiskOperations) throw new InvalidOperationException("MCP disk budget exceeded.");
                 return response;
             }
             object[] Targets() => [new { kind = "dashboard", id = scope.Label }];
