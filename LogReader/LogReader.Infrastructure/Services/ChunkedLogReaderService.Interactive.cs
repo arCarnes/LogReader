@@ -86,9 +86,10 @@ public partial class ChunkedLogReaderService
 
         private async ValueTask ResumeAsync(CancellationToken ct)
         {
-            if (_stream != null)
-                return;
-            var reopened = OpenReadStream(_path, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            // The initial admitted handle needs the same continuity check as a reopened
+            // handle: the file may have changed after creation but before the first scan.
+            var reopened = _stream ?? OpenReadStream(_path, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            _stream = reopened; // Own it even if metadata inspection throws before validation.
             var token = _owner.GetGenerationTokenOrUnknown(reopened);
             var writeTime = _owner.GetLastWriteTimeUtcOrDefault(reopened);
             var length = reopened.Length;
@@ -106,6 +107,7 @@ public partial class ChunkedLogReaderService
             }
             catch
             {
+                _stream = null;
                 await reopened.DisposeAsync().ConfigureAwait(false);
                 throw;
             }
@@ -117,6 +119,7 @@ public partial class ChunkedLogReaderService
                 _observedWriteTime = writeTime;
                 return;
             }
+            _stream = null;
             await reopened.DisposeAsync().ConfigureAwait(false);
             await StartAsync(ct).ConfigureAwait(false);
         }
@@ -196,10 +199,11 @@ public partial class ChunkedLogReaderService
 
         public async ValueTask SuspendAsync()
         {
-            if (_stream == null)
+            var stream = _stream;
+            if (stream == null)
                 return;
-            await _stream.DisposeAsync().ConfigureAwait(false);
             _stream = null;
+            await stream.DisposeAsync().ConfigureAwait(false);
         }
 
         public LineIndex TakeCompletedIndex()
@@ -216,9 +220,12 @@ public partial class ChunkedLogReaderService
             if (_disposed)
                 return;
             _disposed = true;
-            await SuspendAsync().ConfigureAwait(false);
-            _index?.Dispose();
-            _index = null;
+            try { await SuspendAsync().ConfigureAwait(false); }
+            finally
+            {
+                _index?.Dispose();
+                _index = null;
+            }
         }
     }
 

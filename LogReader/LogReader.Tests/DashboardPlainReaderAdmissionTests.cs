@@ -63,7 +63,10 @@ public sealed class DashboardPlainReaderAdmissionTests
             var path = unc ? @"\\synthetic-host\share\held.log" : @"C:\fixture\held.log";
             using var scheduler = new DashboardLoadScheduler();
             scheduler.SetForeground("A");
-            using var otherBuild = await scheduler.AcquireAsync(path, () => ["A"], false, default);
+            using var setupDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var otherBuild = await scheduler.AcquireAsync(path, () => ["A"], false, setupDeadline.Token);
+            using var thirdUncSlot = unc ? await scheduler.AcquireAsync(path, () => ["A"], false, setupDeadline.Token) : null;
+            using var fourthUncSlot = unc ? await scheduler.AcquireAsync(path, () => ["A"], false, setupDeadline.Token) : null;
             var reader = new HeldReader();
             using var tail = new StubFileTailService();
             using var session = new FileSession(new FileSessionKey(path, FileEncoding.Utf8),

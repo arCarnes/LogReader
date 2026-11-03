@@ -1,6 +1,8 @@
 # UNC performance design
 
-Status: Proposed implementation; no runtime changes delivered by this document. Baseline: `9228d9c`, reviewed 2026-11-02. Read the [execution plan](ExecutionPlan.md) for status and [validation requirements](ValidationAndMeasurements.md) for acceptance.
+Status: U0 complete; U1 performance trial rejected, correctness fixes retained; U2 four-worker UI policy accepted after the required repeat; U3 admission trial rejected below the primary performance gate and runtime restored; U4 preparation trial rejected after the required repeat; preceding runtime restored and validated; U5 complete. Planning baseline: `9228d9c`, reconciled against execution baseline `415248a` on 2026-11-02. Read the [execution plan](ExecutionPlan.md) for status and [validation requirements](ValidationAndMeasurements.md) for acceptance.
+
+Final outcome and requirement audit: [Results.md](Results.md).
 
 ## Observed behavior
 
@@ -19,7 +21,11 @@ Source links below are relative to this document. Recheck symbols at execution t
 
 Measured evidence supports the first two opportunities and overlapping idle checks. It does not prove which individual calls caused SMB packets, cold throughput, server saturation or application responsiveness.
 
-## U1: first interactive scan
+## U1: rejected first interactive scan trial
+
+Outcome: rejected after the complete paired comparison and one required repeat. Repeat primary paired improvements were 2.47% and 0.24%, below 15%, with protected workflow regressions. Creation-turn suspension and its ordinary progress publication are restored. The following describes the evaluated trial, not an accepted change to reapply during this package.
+
+Correctness fixes remain: failed advances drain build disposal inside admission; direct interactive advancement revalidates an existing initial handle; reopened streams become build-owned before metadata inspection; index storage is released even if closing the stream fails. These preserve ownership/continuity contracts without retaining first-turn scanning, changing limits or adding successful-path metadata operations to the restored dashboard workflow. See the execution record for exact tests, retained scope and candidate hashes.
 
 Within the existing acquired scheduler lease, create the interactive build and, when it can resume, call `AdvanceAsync` even on the creation turn. Keep its existing `shouldYield` callback and cancellation token. If creation selected the unknown-identity fallback, do not dereference or advance the disposed/null build; use the existing admitted fallback path.
 
@@ -27,15 +33,17 @@ Retain the handle only while that lease is active. If incomplete, suspend before
 
 Tests must demonstrate first-turn scanning without a reopen when uncontended and suspension/revalidation at a real scheduling boundary. Prefer existing reader/scheduler test seams; add a small internal observer only if the behavior cannot otherwise be established. Do not expose diagnostics or implementation details in product UI.
 
-## U2: UI concurrency candidate
+## U2: accepted UI concurrency
 
-Evaluate dashboard and search/filter UNC host limits of **four**, with share limit **four**. Keep dashboard global 24, search/filter global 32, local-root two and unknown-path one. Preserve the dashboard scheduler's preview reservation, foreground ordering and single background operation. No new setting or public policy API is required.
+Accepted after the required ui-v2 repeat: paired UNC search improvements were 49.73% and 48.22%, with all protected and preview gates passing. Dashboard and search/filter UNC host limits are **four**, with share limit **four**. Keep dashboard global 24, search/filter global 32, local-root two and unknown-path one. Preserve the dashboard scheduler's preview reservation, foreground ordering and single background operation. No new setting or public policy API is required.
 
 Test same share, multiple shares on one host, different hosts, local/UNC mixtures, extended UNC syntax and cancellation while queued. Host and share are independent bounds, not multipliers. Do not add real network targets for topology tests.
 
 Use the [candidate decision rule](ValidationAndMeasurements.md#candidate-decision-rule) before retaining the new defaults. If rejected, retain the previous defaults, record the evidence and continue the independent MCP phases. Do not broaden scope to an adaptive feedback controller or an eight-worker default.
 
-## U3: MCP admission
+## U3: rejected MCP admission trial
+
+Outcome: rejected after both complete primary sessions improved by only 7.96% / 9.53%, below 15%, with protected gates passing. No repeat trigger applied. The preceding global-two/single-UNC runtime is restored; deterministic test improvements remain. The following describes the evaluated trial, preserved at `6239a67`, rather than accepted behavior.
 
 Replace the single UNC semaphore with one backend-owned admission coordinator for all backend disk-operation entry points. Share normalization with existing Core topology classification where practical, without coupling Infrastructure to WPF. UNC classification must handle ordinary and extended UNC paths case-insensitively; classification examines path strings only and performs no directory discovery. Preserve current treatment of non-UNC and malformed inputs; do not introduce mapped-drive/network discovery.
 
@@ -47,7 +55,9 @@ Route `ExecuteDiskOperationAsync`, `AcquireDiskOperationAsync` and `ProbePathExi
 
 ## U4: parallel monitor preparation with ordered evaluation
 
-Use a request-local two-slot lookahead, capped further by the effective global disk limit, for initial baselines and subsequent poll preparation. Workers operate on independent checkpoint/tracker clones. Start synchronous open/encoding/metadata work on worker threads so constructing the second task can actually overlap the first; do not execute that work on the UI or transport dispatch thread.
+Outcome: **rejected** after the required complete repeat. Repeat primary paired ratios were **1.5310 / 1.4732** (53.10% / 47.32% slower), with protected local active monitor regressions. Restore preceding sequential monitor baselines/polls, retaining existing global-two/single-UNC admission and budgets. The following describes the evaluated trial preserved at **`3b58dd6`**, not accepted runtime behavior. Its timeout-pagination and additional validation/preparation operations are also removed. Independent deterministic test improvements remain; see the execution record.
+
+Use a request-local two-slot lookahead, capped further by the effective global disk limit, for initial baselines and subsequent poll preparation. With U3 rejected, retain the preceding global-two/single-UNC admission; two prepared readers do not imply two admitted UNC operations. Workers operate on independent checkpoint/tracker clones. Start synchronous open/encoding/metadata work on worker threads so constructing the second task can actually overlap the first; do not execute that work on the UI or transport dispatch thread.
 
 For initialization, prepare at most two existing admitted baseline slots concurrently. Merge each completed result in stable file order using the existing stopped-error policy. Keep the rule that a scope cursor commits only after every selected file has a safe baseline or explicit stopped error. Handoff keeps its existing source-boundary transfer semantics and does not establish fresh baselines.
 
@@ -58,6 +68,8 @@ For polling:
 3. Reduce the next slot in stable order. Reacquire disk admission for its scan and after-read validation, apply the existing total/per-file budgets and update only that private tracker. The reducer alone mutates aggregate counters, response/provenance budgets, event output, `NextFile`, `SweepRemaining` and `SweepActive`.
 4. Perform a final scanner validation before accepting a prepared reader's result, including idle readers. Concurrent preparation must not turn a delayed/stale encoding or generation observation into a successful unchanged result. Existing split-UTF-8 and unfinished-line semantics remain authoritative.
 5. Consume a slot only after its success or existing per-file error is reduced. Discard unconsumed prepared clones when a total budget, period or cancellation stops the poll. A prepared but unconsumed file is not checked and does not advance the committed cursor.
+
+The trial revalidates the current path/generation and encoding before deferred consumption, then validates again after reading. It rechecks aggregate time/period limits after awaiting preparation. A per-file timeout consumes that file's explicit error slot and ends this poll, leaving prepared followers unchecked for the next cursor; their deadlines are not reset. This preserves forward sweep progress when a slow file exhausts the prepared follower's slice. A completed-but-expired unconsumed preparation likewise remains unchecked. `MaxFiles` remains an upper bound. Deterministic coverage requires the healthy follower to advance exactly once on the next cursor and forbids false idle/replay I/O.
 
 Do not parallelize line evaluation or share mutable matchers/budgets across workers in this pass. Preserve the public 100-file scope cap, ten-file default poll, 4 MiB total scan cap, 256 KiB per-file cap, line/text/provenance bounds and selected date. Timeouts remain cooperative. Each file's deadline includes its preparation and reduction work; never reset the timeout when a prepared result is consumed. Preserve the current file-slice calculation from the admitted poll size and request timeout.
 

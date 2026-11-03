@@ -1842,6 +1842,8 @@ public class SearchServiceTests : IAsyncLifetime
         var paths = Enumerable.Range(1, 6)
             .Select(index => UncPath("server", "share", $"file{index}.log"))
             .ToArray();
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var activeCount = 0;
         var maxActiveCount = 0;
         var service = new SearchService(async (filePath, _, _, ct) =>
@@ -1850,7 +1852,8 @@ public class SearchServiceTests : IAsyncLifetime
             UpdateMaxObserved(ref maxActiveCount, active);
             try
             {
-                await Task.Delay(75, ct);
+                if (active == 4) ready.TrySetResult();
+                await release.Task.WaitAsync(ct);
                 return new SearchResult { FilePath = filePath };
             }
             finally
@@ -1860,9 +1863,20 @@ public class SearchServiceTests : IAsyncLifetime
         });
         var request = new SearchRequest { Query = "needle", FilePaths = paths.ToList() };
 
-        await service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>());
+        var work = service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>());
+        try
+        {
+            await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(4, Volatile.Read(ref activeCount));
+        }
+        finally
+        {
+            release.TrySetResult();
+            await work.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.Equal(0, Volatile.Read(ref activeCount));
 
-        Assert.Equal(2, maxActiveCount);
+        Assert.Equal(4, maxActiveCount);
     }
 
     [Fact]
@@ -1873,6 +1887,8 @@ public class SearchServiceTests : IAsyncLifetime
             .Concat(Enumerable.Range(1, 2)
                 .Select(index => UncPath("server", "share-b", $"b{index}.log")))
             .ToArray();
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var activeCount = 0;
         var maxActiveCount = 0;
         var activeCountByShare = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1889,7 +1905,8 @@ public class SearchServiceTests : IAsyncLifetime
                 (_, currentMax) => Math.Max(currentMax, activeForShare));
             try
             {
-                await Task.Delay(75, ct);
+                if (active == 4) ready.TrySetResult();
+                await release.Task.WaitAsync(ct);
                 return new SearchResult { FilePath = filePath };
             }
             finally
@@ -1900,11 +1917,23 @@ public class SearchServiceTests : IAsyncLifetime
         });
         var request = new SearchRequest { Query = "needle", FilePaths = paths.ToList() };
 
-        var results = await service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>());
+        var work = service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>());
+        try
+        {
+            await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(4, Volatile.Read(ref activeCount));
+        }
+        finally
+        {
+            release.TrySetResult();
+            await work.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        var results = await work;
+        Assert.Equal(0, Volatile.Read(ref activeCount));
 
         Assert.Equal(paths, results.Select(result => result.FilePath).ToArray());
-        Assert.Equal(3, maxActiveCount);
-        Assert.Equal(2, maxActiveCountByShare["share-a"]);
+        Assert.Equal(4, maxActiveCount);
+        Assert.InRange(maxActiveCountByShare["share-a"], 2, 4);
         Assert.True(maxActiveCountByShare["share-b"] <= 2);
     }
 

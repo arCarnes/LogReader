@@ -62,6 +62,61 @@ public sealed class InteractiveLogReaderTests : IDisposable
         Assert.Equal(1, build.Progress.Attempt);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InitialHandle_RevalidatesRewriteBeforeFirstQuantum(bool growth)
+    {
+        var path = await WriteAsync("old\n" + new string('a', 100_000), FileEncoding.Utf8);
+        var reader = new ChunkedLogReaderService();
+        await using var build = await ((IInteractiveLogReaderService)reader).CreateIndexBuildAsync(path, FileEncoding.Utf8, default);
+        // Retain the initial handle, then change its file before the first scan. No suspension
+        // or reopen may be relied on to discard preamble buffering or detect the rewrite.
+        await File.WriteAllTextAsync(path, "new\nrow\n" + new string('b', growth ? 150_000 : 99_996));
+        using var expected = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        while (!await build.AdvanceAsync(InteractiveLogLoadLimits.ScanQuantumBytes, () => false, default))
+            await build.SuspendAsync();
+        Assert.Equal(2, build.Progress.Attempt);
+        using var actual = build.TakeCompletedIndex();
+        Assert.Equal(expected.FileSize, actual.FileSize);
+        Assert.Equal(expected.LineCount, actual.LineCount);
+        for (var i = 0; i < actual.LineCount; i++) Assert.Equal(expected.LineOffsets[i], actual.LineOffsets[i]);
+    }
+
+    [Fact]
+    public async Task ResumedHandle_MetadataFailureRemainsOwnedUntilBuildDisposal()
+    {
+        var path = await WriteAsync("seed\n", FileEncoding.Utf8);
+        var failMetadata = false;
+        var closedByBuild = false;
+        Microsoft.Win32.SafeHandles.SafeFileHandle? resumedHandle = null;
+        var reader = new ChunkedLogReaderService(stream =>
+        {
+            if (!failMetadata) return ChunkedLogReaderService.GetLastWriteTimeUtc(stream);
+            resumedHandle = stream.SafeFileHandle;
+            throw new InvalidOperationException("Controlled metadata failure.");
+        });
+        var build = await ((IInteractiveLogReaderService)reader).CreateIndexBuildAsync(path, FileEncoding.Utf8, default);
+        try
+        {
+            await build.SuspendAsync();
+            failMetadata = true;
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await build.AdvanceAsync(InteractiveLogLoadLimits.ScanQuantumBytes, () => false, default));
+        }
+        finally
+        {
+            try { await build.DisposeAsync(); }
+            finally
+            {
+                closedByBuild = resumedHandle?.IsClosed == true;
+                resumedHandle?.Dispose(); // Clean up the reproduced native leak even after an assertion fails.
+            }
+        }
+        Assert.NotNull(resumedHandle);
+        Assert.True(closedByBuild);
+    }
+
     [Fact]
     public async Task SuspendedIndex_AppendKeepsFrozenExtent()
     {

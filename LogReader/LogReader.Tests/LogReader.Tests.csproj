@@ -18,6 +18,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="UncPerformanceHarness\**\*.cs" />
+    <Compile Include="UncPerformanceHarness\UiWorkflowMeasurements.cs" />
+    <Compile Include="..\LogReader.Core.Tests\UncPerformanceHarness\FixtureStore.cs" Link="UncPerformanceFixtureStore.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="LogReader.Testing" />
   </ItemGroup>

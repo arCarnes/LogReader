@@ -699,20 +699,39 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
                     var fallback = false;
                     using (var lease = await _loadScheduler!.AcquireAsync(FilePath, GetDashboardScopes, preview: false, ct).ConfigureAwait(false))
                     {
-                        if (build == null)
+                        try
                         {
-                            build = await ((IInteractiveLogReaderService)_logReader).CreateIndexBuildAsync(FilePath, encoding, ct).ConfigureAwait(false);
-                            created = true;
-                            if (!build.CanResume)
+                            if (build == null)
                             {
-                                await build.DisposeAsync().ConfigureAwait(false);
-                                build = null;
-                                fallback = true;
+                                build = await ((IInteractiveLogReaderService)_logReader).CreateIndexBuildAsync(FilePath, encoding, ct).ConfigureAwait(false);
+                                created = true;
+                                if (!build.CanResume)
+                                {
+                                    await build.DisposeAsync().ConfigureAwait(false);
+                                    build = null;
+                                    fallback = true;
+                                }
                             }
+                            completed = !created && build != null && await build.AdvanceAsync(InteractiveLogLoadLimits.ScanQuantumBytes, lease.ShouldYield, ct).ConfigureAwait(false);
+                            if (!completed && build != null)
+                                await build.SuspendAsync().ConfigureAwait(false);
                         }
-                        completed = !created && await build!.AdvanceAsync(InteractiveLogLoadLimits.ScanQuantumBytes, lease.ShouldYield, ct).ConfigureAwait(false);
-                        if (!completed && build != null)
-                            await build.SuspendAsync().ConfigureAwait(false);
+                        catch (Exception failure)
+                        {
+                            // Failed advances may still own an open handle. Drain disposal
+                            // before returning this lease to another preview or index quantum.
+                            var failedBuild = build;
+                            build = null;
+                            if (failedBuild != null)
+                            {
+                                try { await failedBuild.DisposeAsync().ConfigureAwait(false); }
+                                catch (Exception cleanupFailure)
+                                {
+                                    throw new AggregateException("Interactive indexing and cleanup failed.", failure, cleanupFailure);
+                                }
+                            }
+                            throw;
+                        }
                     }
                     if (fallback)
                     {

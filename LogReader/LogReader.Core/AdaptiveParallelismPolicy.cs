@@ -4,9 +4,9 @@ internal static class AdaptiveParallelismPolicy
 {
     private const int DashboardLoadGlobalCap = 24;
     private const int SearchAndFilterGlobalCap = 32;
-    private const int DashboardLoadUncHostLimit = 2;
-    private const int SearchAndFilterUncHostLimit = 3;
-    private const int UncShareLimit = 2;
+    private const int DashboardLoadUncHostLimit = 4;
+    private const int SearchAndFilterUncHostLimit = 4;
+    private const int UncShareLimit = 4;
     private const int LocalRootLimit = 2;
     private const int UnknownLimit = 1;
 
