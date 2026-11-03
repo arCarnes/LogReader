@@ -33,7 +33,8 @@ internal sealed class DashboardLoadScheduler : IDisposable
     public async Task<Lease> AcquireAsync(string path, Func<IReadOnlyList<string>> scopes, bool preview, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DashboardLoad, [path, path]);
+        // A single request still uses the full four-worker UNC policy, independently of batch size.
+        var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DashboardLoad, [path, path, path, path]);
         var work = new Work(plan.Groups, scopes, preview, ct);
         lock (_gate)
         {

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>LogReader.Tests</AssemblyName>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\LogReader.App\LogReader.App.csproj" />
+    <Compile Include="..\WpfTestHost.cs" Link="WpfTestHost.cs" />
+    <Compile Include="..\WpfTestHostLifetime.cs" Link="WpfTestHostLifetime.cs" />
+    <Compile Include="..\UiTestDoubles.cs" Link="UiTestDoubles.cs" />
+    <Compile Include="..\InteractiveDesktop.cs" Link="InteractiveDesktop.cs" />
+    <Compile Include="..\..\LogReader.Core.Tests\UncPerformanceHarness\FixtureStore.cs" Link="FixtureStore.cs" />
+  </ItemGroup>
+
+</Project>

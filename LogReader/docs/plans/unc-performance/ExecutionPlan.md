@@ -1,16 +1,17 @@
 # UNC performance execution plan
 
-Created: 2026-11-02. Status: Planning package only. Runtime baseline: `9228d9c`. Authority: current user instructions, repository `AGENTS.md`, [design](Design.md) and [validation contract](ValidationAndMeasurements.md).
+Created: 2026-11-02. Status: U0 complete; U1 optimization rejected with correctness retained; U2 accepted; U3 optimization rejected and runtime restored; U4 optimization rejected and preceding runtime restored/validated; U5 complete. Planning baseline: `9228d9c`; reconciled execution/runtime baseline: `415248a`. Authority: current user instructions, repository `AGENTS.md`, [design](Design.md) and [validation contract](ValidationAndMeasurements.md).
 
 ## Resume checkpoint
 
-- Current phase: U0, **Not started**.
-- Next action: inspect actual HEAD, working tree and applicable instructions; reconcile this package with current source, then establish U0 fixtures and baselines.
-- Runtime changes completed under this package: none.
-- Runtime validation performed under this package: none. Earlier investigation results are historical evidence, not acceptance for future changes.
-- Owned implementation operations/resources: none.
-- Commit evidence: planning-package commit is discoverable with `git log -- LogReader/docs/plans/unc-performance`; record implementation hashes in the ledger below after each commit.
-- Deferred/externally unavailable checks: none assessed yet. During execution, record the exact unavailable lane and continue independent work; do not claim final acceptance until required checks are resolved.
+- Current phase: **U0-U5 complete**. U1/U3/U4 performance trials rejected with required measurements/restoration; U1 correctness and U2 four-worker UI policy retained. U5 actual UI required repeat and final MCP/component/solution/desktop/resource audits passed. Final runtime source **7f2c63b**; see Results.md for the concise outcome.
+- Reconciliation: began at clean HEAD `415248a` (`Merge pull request #24 from arCarnes/codex/mcp-tool-consistency`). Recent deployment-cleanup changes do not alter the planned FileSession/policy/admission/monitor touchpoints; observed design behavior remains present. No unrelated edits were present or changed.
+- Completed U0 units: component and real MCP baselines; actual WPF dashboard/preview, isolated indexed reads, UI search/filter and shutdown baselines; three new gated interactive ownership cases and a required native dashboard window smoke. Detailed evidence below. U0 introduced no runtime optimization.
+- Next action: none required for this package. Final outcome documentation is committed with the delivery; resolve its hash using `git log -1 -- LogReader/docs/plans/unc-performance/Results.md`. No push/tag/version/release/installation is authorized. Desktop preparation and broader production measurements remain separately scoped discussions.
+- Accepted runtime changes under this package: U1 ownership/continuity fixes with initial suspension restored and U2 four-worker UI caps/scheduler. U3 topology trial is rejected; backend and policy match accepted U2 runtime 129140b exactly, with retained test-only reliability/ownership improvements. UI global 24/32, local two, unknown one, preview/background policy and MCP global-two/single-UNC bounds remain unchanged. Preserve all bundles/fixtures.
+- Owned implementation operations/resources: **none live**. All U5 measurement handles 10264/62324/84387/84296 and final validation/cleanup handles are terminal. All 4,456 historical owner locks inactive, zero measurement executables/test runners. Original 32 and final 22 provenance hashes verified; 112 sampler reports / 6,216 measurements validated. Solution Core 1,005/UI 1,510, retained Core 39/UI 25 three times, desktop 7 three times and fresh MCP smoke all pass, zero skips.
+- Commit evidence: U0 component `3de8dca`, MCP `380ecb8`, UI `2f81e4d`, lifecycle/resource completion **`ed345c8`**. U1 trial **`f52532d`**, bounded diagnostic tooling `ffd7abb`, first comparison checkpoint `ae88029`; final rejection/restoration/correctness **`ae75ae2`**, `fix: retain interactive ownership and reject first-quantum trial`. This documentation-only follow-up records its actual hash; find the checkpoint's own hash with `git log -1 -- LogReader/docs/plans/unc-performance/ExecutionPlan.md`. No push, tag, version or history rewrite occurred.
+- External execution constraint: sandboxed VSTest/UNC limitations are resolved for execution through the authorized native Windows context, without timeout/security changes. Latest required desktop runner passed 7/7, including the new actual dashboard window smoke. Real UI latency baselines are recorded separately from generic native shell smoke cases.
 
 Update this checkpoint before stopping a later execution turn. Record current phase, completed steps, next concrete action, modified files, validation commands/results, active processes/tasks/leases, failures and unresolved decisions. Reconcile documentation with actual commits; never infer completion from a checkbox alone.
 
@@ -24,7 +25,7 @@ Use the [candidate rule](ValidationAndMeasurements.md#candidate-decision-rule) f
 
 ## U0 - baseline and characterization
 
-State: **Not started**. Dependency: none.
+State: **Complete**. Dependency: none.
 
 - Recheck observed behavior and recent UTF-8/line-continuity fixes against the design. Record actual baseline commit, SDK, configuration and effective limits.
 - Add a maintained, opt-in measurement entry point under `LogReader/packaging/scripts`, with any small supporting harness under existing test infrastructure. Match project style and existing dependencies. It must run on a clean checkout without the ignored investigation harness or fixture names. Keep private internal API access within existing test-friend assemblies.
@@ -35,11 +36,11 @@ State: **Not started**. Dependency: none.
 - Validation: V-Core and V-UI for changed test infrastructure, three repetitions of new concurrency characterization, relevant full project suites. New measurement code must build before use. See validation document for commands.
 - Suggested commit: `test: establish UNC performance baselines`.
 
-Evidence/commit: pending.
+Evidence/commit: component, real UI/MCP/lifecycle baselines, native desktop and deterministic ownership/budget evidence recorded below. UI unit `2f81e4d`; lifecycle/resource unit is the commit containing the final U0 section (resolve with `git log -1 -- LogReader/LogReader.Core.Tests/UncScannerLifetimeCharacterizationTests.cs`). No runtime optimization included.
 
 ## U1 - first interactive quantum
 
-State: **Not started**. Dependency: U0.
+State: **Complete — optimization rejected; correctness fixes retained**. Dependency: U0 (complete at `ed345c8`).
 
 - Touchpoints: `FileSession.BuildIndexOffUiAsync`, interactive reader tests, dashboard loading/responsiveness and scheduler tests.
 - Advance a resumable newly created build within its initial scheduler lease; guard unknown-identity fallback explicitly. Keep suspension before every incomplete lease release, bounded scanning, preview yield, final index transfer and tail-registration ordering.
@@ -48,11 +49,11 @@ State: **Not started**. Dependency: U0.
 - Validation: V-Core interactive/encoding/index tests; V-UI dashboard/session/scheduler tests; changed concurrency tests three times; both affected project suites before phase acceptance.
 - Suggested commit: `perf: scan the first interactive index quantum before suspension`.
 
-Evidence/commit: pending.
+Evidence/commit: trial `f52532d`; two complete paired comparisons plus one excluded setup-failed run, restored scheduling and passing final correctness validation recorded in the final U1 section. The restoration/correctness commit is identified in the resume checkpoint. No performance improvement accepted.
 
 ## U2 - four-worker UI policy trial
 
-State: **Not started**. Dependency: U1 accepted or rejected with evidence.
+State: **Complete — accepted**. Dependency: U1 rejected with evidence, correctness-only runtime retained at `ae75ae2` / checkpoint `1e78a96`.
 
 - Touchpoints: `AdaptiveParallelismPolicy`, `AdaptiveParallelismPolicyTests`, dashboard scheduler and search/filter batch tests.
 - Trial four per UNC host and four per share for dashboard/search/filter. Preserve global 24/32, local two, unknown one and the separate single-background policy. Update intentional cap assertions without weakening behavioral assertions.
@@ -61,11 +62,11 @@ State: **Not started**. Dependency: U1 accepted or rejected with evidence.
 - Validation: V-Core policy/search/filter tests; V-UI scheduler/dashboard/filter/search tests; three repeated concurrency runs and full affected suites.
 - Suggested commit: `perf: increase bounded UI UNC concurrency` if accepted; otherwise record the trial result in a documentation/test commit.
 
-Evidence/commit: pending.
+Evidence/commit: accepted runtime `52bfedf`; ui-v2 tooling `48afbc7`; two complete ui-v2 comparisons and required repeat outcome recorded below. This outcome commit closes U2.
 
 ## U3 - topology-aware MCP admission
 
-State: **Not started**. Dependency: U2 accepted or rejected with evidence.
+State: **Complete — optimization rejected; preceding runtime restored**. Dependency: U2 accepted at `129140b`.
 
 - Touchpoints: backend operation/probe/lease helpers, Core path classification if extracted, backend lifetime tests and resumable query tests.
 - Implement the design's backend-owned coordinator: atomic global/host/share admission, oldest eligible waiter, cancellation-safe idempotent lease and bounded group registry. Keep effective global default two; host/share caps are at most two. Do not change heavy-request limits or two-file search/count lookahead.
@@ -74,11 +75,11 @@ State: **Not started**. Dependency: U2 accepted or rejected with evidence.
 - Validation: V-Core backend, resumable, monitor, continuation, admission and limits coverage three times for concurrency tests, then full Core suite. Run stdio smoke against a freshly built/published local artifact if backend composition/lifetime changed. Use existing artifact scripts without writing remote fixtures.
 - Suggested commit: `perf: share topology-aware admission across MCP disk operations`.
 
-Evidence/commit: pending.
+Evidence/commit: trial `6239a67`; complete 2,184-measurement comparison, consistent primary failure, restoration and final passing checks recorded below. This outcome commit closes U3.
 
 ## U4 - two-slot monitor preparation
 
-State: **Not started**. Dependency: U3 accepted or rejected with evidence. If U3 is rejected, U4 may proceed only within the preceding accepted admission limits; do not claim overlap that those limits prohibit.
+State: **Complete — optimization rejected; preceding runtime restored and validated**. Dependency: U3 rejected/restored at `c2c0f9e`. If U3 is rejected, U4 may proceed only within the preceding accepted admission limits; do not claim overlap that those limits prohibit.
 
 - Touchpoints: monitor initialization/polling, internal prepared-file ownership, scanner interfaces only if necessary, monitor/lifecycle tests and working-memory accounting tests.
 - Implement at most two concurrent baseline preparations and two-slot poll lookahead as specified in the design. Keep actual line evaluation and shared-budget/state reduction ordered and single-owned. Handoff reuses its existing boundaries.
@@ -88,11 +89,11 @@ State: **Not started**. Dependency: U3 accepted or rejected with evidence. If U3
 - Validation: V-Core monitor/backend/scanner/resumable/continuation/limits coverage; new concurrency tests three times; full Core suite; real stdio smoke. V-UI affected integration/stdio and monitoring tests, then affected full suite.
 - Suggested commit: `perf: prepare bounded monitor files concurrently`.
 
-Evidence/commit: pending.
+Evidence/commit: trial **3b58dd6**; two complete comparisons / 4,368 measurements, primary slowdown and protected regressions; focused restoration and retained test validation recorded below.
 
 ## U5 - integrated acceptance and delivery
 
-State: **Not started**. Dependency: all prior phases assessed with required evidence.
+State: **Complete — integrated validation and measurements accepted after the prescribed UI repeat**. Dependency: U0-U4 all assessed; U4 restoration committed at **7f2c63b**.
 
 - Run final full solution Release build and service-safe tests, followed by the separate real interactive desktop lane. Repeat all newly introduced concurrency regressions three times after the last runtime change. Tests must actually execute.
 - Compare the U0 baseline and final candidate using the documented paired protocol. Include UNC end-to-end snapshot/search/count/read/initialization/idle calls, actual dashboard open/preview behavior, local active matching/nonmatching/lifecycle cases, response parity/bytes and retained resource counts. Do not write to remote logs to create activity.
@@ -102,17 +103,622 @@ State: **Not started**. Dependency: all prior phases assessed with required evid
 - Acceptance: required checks passed, performance decisions justified, no running owned operations, relevant changes committed, checkpoint and outcome ledger complete. Any unavailable required desktop/UNC lane leaves U5 incomplete.
 - Suggested commit: `docs: record UNC performance acceptance and outcomes`.
 
-Evidence/commit: pending.
+Evidence/commit: final runtime **7f2c63b**, U5 validation/provenance checkpoint **156ca9e**, component outcome **8449c01**, first UI/repeat checkpoints **df7f35a** / **1739e99**; final MCP outcome/completion audit below and in Results.md.
 
 ## Decisions, surprises and outcomes ledger
 
 | Item | Current decision/evidence |
 | --- | --- |
-| UI concurrency | Trial four host/share workers; retention governed by measurement rule. |
-| MCP concurrency | Existing global default two retained; topology caps two and preparation lookahead two. |
-| Monitor strategy | Parallel preparation only; ordered line evaluation and reduction. |
+| UI concurrency | Accepted four host/share workers after the required ui-v2 repeat passed primary and protected gates. |
+| MCP concurrency | Global default two and shared UNC one retained after U3/U4 rejection. |
+| Monitor strategy | Sequential baseline/poll implementation restored after two-slot preparation regressed in both comparisons. |
 | Recent baseline changes | Split UTF-8 continuity fixes exist at `9228d9c`; historical measurements are not current-head acceptance. |
 | Remote mutation | Excluded; active mutation scenarios use local files and fake UNC tests. |
-| U0-U5 outcomes | Pending. No optimization is implemented or accepted by this planning package. |
+| U0-U5 outcomes | U0 complete at `ed345c8`; U1 optimization rejected after the required repeat, with independently required correctness fixes retained and validated. U2 accepted after the required repeat; U3 rejected below 15%, runtime restored and tests retained; U4 optimization rejected after required repeat, runtime restored and validated; U5 complete: final solution/native desktop, retained concurrency, paired component/UI/MCP, provenance/resource/cleanup audits pass. |
 
 Append each material discovery with date, evidence, affected phase and resolution. Routine implementation details can be resolved within the design; public behavior changes or new deferred features require a separate scoped decision.
+
+2026-11-02, U2 implementation finding: `DashboardLoadScheduler.AcquireAsync` builds its policy plan from `[path, path]`. Group limits are capped by target count, so merely changing policy constants to four would leave real dashboard admission capped at two. The U2 trial must address this internal plan construction as well as constants, preserving global 24, local/unknown bounds, preview reservation and the single background lane. No scheduling/runtime edit has been made yet.
+
+## U0 execution evidence — 2026-11-02, first tooling unit
+
+### Environment, fixtures and preserved baseline
+
+- Runtime source baseline `415248a`; no runtime files changed. SDK `10.0.403` satisfies `global.json` `10.0.402` / `latestPatch`; runtime `.NET 10.0.14`, Windows `10.0.26200`, x64. Release, serial MSBuild, shared compilation disabled. Product version stays `1.5.15`.
+- Prepared `u0-415248a-native` through `Measure-UncPerformance.ps1 -Mode Prepare -RunId u0-415248a-native -IncludeUnc` on the authorized native host. Exactly 111 remote regular files / 2,398,322 bytes discovered, bounded to the authorized subtree; 1/10/100 scopes available. The ordered 100-file scope is 1,679,152 bytes. No remote writes, parent/sibling enumeration or reparse-target traversal. Large real UNC throughput remains outside the available small-file coverage; local 128 MiB coverage is real, not a substituted UNC claim.
+- Local recipe `numbered-v1-no-randomness`: 100 files, each 4,507 bytes / 250 numbered UTF-8 lines / one `needle` hit; 100-file scope 450,700 bytes / 25,000 lines / 100 hits. Additional 128 MiB (1,048,576 terminated 128-byte lines), 9 MiB (>two scan quanta), and nine short BOM/BOM-less/fragment/CRLF/unfinished fixtures generated locally. The short fixtures still need lifecycle measurement execution.
+- Local artifact root: repository `artifacts/measurements/unc-performance/`. Private manifest `u0-415248a-native/fixtures/manifest.private.json`, SHA-256 `E3FA08CBF7CFAA58AE3DAAE765032E088F76E7422B766031F8F908202A9D8868`; do not commit it or print its physical paths. Content hash and size/write/known generation evidence are rechecked before/after component scopes. No drift observed in completed sessions.
+- Preserved `u0-415248a-native/baseline-components`, `baseline-app`, `baseline-mcp`; full relative artifact/hash inventory is `preserved-bundles.json`. Infrastructure DLL SHA-256 `874973B31A4141EBBB339DA2E0DA49A8AE65A08F715B4687164ADABF986132B4`; Core DLL `E3DE3F103407BF94064842E758369A7C8C1E9D319E914A458261D196337DAF74`; App DLL `CA122674F00CEEE646C700FC6830990C06BBB4A377461D20C0201B940D20AC60`; MCP DLL `A34EB7980DFE4CBCD6A75F432EB736A6138148161335B1600C26F5A48942CA74`.
+- The preserved component harness predates final output-ancestor, canonicalization and report-context guards. Runtime assemblies are unchanged. Final tooling bundle is `u0-harness-final` (harness DLL SHA-256 `21BD9B7D8EB1A5145181D7E1D2FF755D9C90E6A32288FC00034C7DF039C88168`); paired-driver validation verified both bundles against the same original private manifest. Do not substitute a newly generated manifest in the middle of paired comparisons.
+
+### Actual component measurements
+
+Command: `Measure-UncPerformance.ps1 -Mode Baseline -RunId u0-components-baseline-session -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u0-415248a-native/baseline-components`. Two sequential sessions, seven fresh-process samples per session, each API warmed outside timing, no concurrent builds/tests, warm/cache-uncontrolled. Fourteen raw reports, 48 scenarios each, **672 completed measurements**, zero unavailable scopes. Full per-session medians/minima/maxima are in that run's `summary.json`; raw reports retain exact-result hashes and resource observations. The initial summary incorrectly reports `processSamples=1` due to PowerShell projection of ordered dictionaries; raw reports prove 14 actual processes. The maintained driver now uses an explicit counter. Retain the original evidence and document this correction rather than rewriting raw results.
+
+| Component, fixture | Session 1 median (min–max), ms | Session 2 median (min–max), ms | Exact units per sample |
+| --- | ---: | ---: | ---: |
+| Interactive initial-suspend, UNC 100 | 401.55 (386.64–422.32) | 401.98 (393.97–411.86) | 25,210 indexed lines |
+| Index, UNC 100 | 288.26 (272.47–294.94) | 286.97 (283.28–301.92) | 25,210 indexed lines |
+| Production policy search, UNC 100 | 342.52 (299.75–351.66) | 331.30 (304.02–349.26) | 205 exact hits |
+| Production policy filter, UNC 100 | 323.67 (308.72–357.56) | 342.30 (319.59–358.84) | 205 matching line identities |
+| Idle scanner checks at caller bound two, UNC 100 | 234.06 (200.74–244.00) | 231.06 (211.68–242.01) | 100 unchanged EOF checkpoints |
+| Production policy search, local 100 | 18.37 (17.91–19.53) | 18.30 (16.88–19.49) | 100 exact hits |
+| Index, local 128 MiB | 162.52 (153.85–175.06) | 163.66 (160.61–170.36) | 1,048,576 indexed lines |
+| Interactive initial-suspend, local 128 MiB | 596.08 (588.31–604.21) | 596.73 (588.37–611.12) | 1,048,576 indexed lines |
+
+All warm/timed identities/counts agree; before/after fixture evidence agrees. Index-offset and hit/filter identities are digested without emitting log text. All component work is awaited and indexes/builds/scanners disposed before report publication. Harness-owned batch peak is at most two operations; idle scanner buffers are at most two (512 KiB). This is not backend admission or monitor working-reservation acceptance. Search/filter admission peaks, process working set and protocol response sizes remain unmeasured. `viewport-100` includes index construction and must not be cited as isolated seek latency. No primary application workflow candidate has been compared or accepted.
+
+Driver validation: `Measure-UncPerformance.ps1 -Mode Compare -RunId u0-driver-self-comparison -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u0-415248a-native/baseline-components -CandidateDirectory ./artifacts/measurements/unc-performance/u0-harness-final` passed. Two sequential seven-pair AB/BA sessions, **28 fresh processes / 1,344 completed measurements**, all paired exact results and fixture hashes equal, no unavailable scenarios, all samples retained. Corrected summary reports `processSamples=28` and 96 scenario/session summaries with paired ratios. This compares unchanged runtime assemblies to validate the driver/tooling revision; it is not an optimization trial or candidate acceptance decision. Builds/tests remained idle throughout the timed run.
+
+Cleanup audit after both runs: all 42 retained local AppPaths metadata lock files could be opened with exclusive sharing and closed immediately, confirming they are inactive evidence files. All recorded execution handles are terminal. `git diff 415248a HEAD` over App/Core/Infrastructure/MCP runtime directories and `Directory.Build.props` is empty at tooling commit `3de8dca`.
+
+### Validation commands and outcomes
+
+All test commands used `-c Release --no-build --no-restore -m:1` after an awaited matching build. TRX artifacts are under repository `artifacts/test-results/unc-performance/` unless noted. Build commands used `-c Release -m:1 -p:UseSharedCompilation=false`. Test processes ran on the authorized native host; compilation ran in the workspace sandbox. No skips in passing runs.
+
+| Command/selection | Actual result | Artifact directory |
+| --- | --- | --- |
+| `dotnet build LogReader/LogReader.Core.Tests/UncPerformanceHarness/UncPerformanceHarness.csproj` | Initial compile caught unsupported `MappedLineOffsets` enumeration; changed to indexed access. Subsequent build/publish passed, 0 warnings/errors. | preserved component bundles |
+| `dotnet build LogReader/LogReader.Core.Tests/LogReader.Core.Tests.csproj` | Passed after final fixture source; 0 errors, 4 NU1900 warnings (NuGet vulnerability endpoint inaccessible). Restore/build completed, no stale binary bypass. | command output |
+| `dotnet test ...Core.Tests.csproj --filter FullyQualifiedName~UncPerformanceFixtureTests` (sandbox) | Aborted: VSTest could not connect to testhost within its existing 90-second limit. Not a pass; no timeout increase. | `u0-fixture-focused` |
+| Same fixture filter, native, final source | 15 executed / 15 passed / 0 failed / 0 skipped. Tests include separator-aware boundaries, unauthorized slash-style UNC, no overwrite, and append/same-size rewrite/replacement evidence. | `u0-fixture-final` |
+| V-Core focused filter plus fixture tests, before final two canonicalization cases | 416 executed / 416 passed / 0 failed / 0 skipped. | `u0-core-focused` |
+| Existing readiness-gated characterization filter, three consecutive native runs | 10/10, 10/10, 10/10 passed; zero skips. No new concurrency tests introduced in this unit. | `u0-concurrency-1`, `-2`, `-3` |
+| `dotnet test ...Core.Tests.csproj` full, final source | 968 executed / 968 passed / 0 failed / 0 skipped. Earlier intermediate full run 966/966, superseded by final run. | `u0-core-final-full` |
+| `dotnet build LogReader/LogReader.Tests/LogReader.Tests.csproj` | Passed, 0 errors / 7 NU1900 warnings; same unavailable vulnerability endpoint. | command output |
+| V-UI focused selection, explicitly `Category!=InteractiveDesktop` | 282 executed / 282 passed / 0 failed / 0 skipped. | `u0-ui-focused` |
+| `dotnet test ...LogReader.Tests.csproj --filter "Category!=InteractiveDesktop"` | 1,503 executed / 1,503 passed / 0 failed / 0 skipped. This excludes desktop-dependent cases. | `u0-ui-full` |
+| `./.github/scripts/Invoke-InteractiveDesktopTests.ps1 -Configuration Release` | Native preflight and required runner passed: 5 executed / 5 passed / 0 failed / 0 skipped. Existing native smoke only; no dashboard latency claim. | `artifacts/test-results/interactive-desktop/b63d2d5fc7ea43af9169f1850ce1c4e7` |
+| `dotnet publish LogReader/LogReader.App/LogReader.App.csproj ... -o artifacts/measurements/unc-performance/u0-415248a-native/baseline-app` | Passed, 0 errors / 2 NU1900 warnings. Local validation output only. | `baseline-app` |
+| `dotnet publish LogReader/LogReader.Mcp/LogReader.Mcp.csproj -r win-x64 --self-contained false ... -o artifacts/measurements/unc-performance/u0-415248a-native/baseline-mcp` | Passed, 0 errors / 2 NU1900 warnings. Local validation output only. | `baseline-mcp` |
+| `Test-McpStdioArtifact.ps1 -ExecutablePath ./artifacts/measurements/unc-performance/u0-415248a-native/baseline-mcp/WeezTail.Mcp.exe` | Passed against freshly published artifact, isolated local fixtures only. | command output |
+
+Repeated characterization filter (same for all three runs): `FullyQualifiedName~SearchLogs_BlockedCandidateProbe|FullyQualifiedName~Dispose_DefersResourceCleanupUntilBlockedCandidateProbeCompletes|FullyQualifiedName~Monitor_ControlledUncWorkRetainsUncGate|FullyQualifiedName~ScannerCancellation_DrainsOwnedSessions`. V-Core/V-UI focused selections are the validation document's exact filters with `UncPerformanceFixtureTests` added to V-Core. Final solution build/test and post-optimization repeats remain U5 work, not satisfied by these project checks.
+
+### Open U0 work and next resume instructions
+
+Continuation classification: **progress** — maintained tooling/tests committed at `3de8dca`, actual baseline and paired-driver evidence acquired, and required existing native desktop access verified. No running process handle needs resumption; start the next independent U0 work item rather than restarting completed sessions.
+
+1. Reconcile actual HEAD/status with the local tooling commit(s). Preserve these private fixtures and baseline bundles. Do not run `Prepare` with existing IDs or overwrite preserved outputs.
+2. UI and MCP entry-point baselines are recorded in the following sections. Preserve the final UI bundle and build candidate UI output separately with the same measurement source. Use the identical final measurement bundle on both sides of MCP comparisons, varying only the server executable. Never compare an old standalone median directly to a new candidate median.
+3. Extend the completed local active nonmatch/match measurements with detailed lifecycle/encoding/handoff scenarios. Add missing first-turn/scheduling-boundary, full-buffer-lifetime and ordered-budget characterization before optimizing. New concurrency coverage requires three runs after its final source edit and affected full suites. Live scanner/buffer/lease proofs remain gated-test work, not working-set inference.
+4. Preserve the two-session/seven-pair protocol for candidates, compare each against preceding accepted behavior, and leave all U1-U4 decisions pending until hard correctness/resource checks and real workflow thresholds are met. Four-worker UI and two-slot MCP candidates have not been implemented or rejected.
+5. No version/tag/branch/history/network-security changes. UNC remains read-only and confined to the authorized subtree. Required dashboard/UNC/MCP measurements and U5 acceptance remain incomplete, despite the passing existing desktop lane.
+
+## U0 execution evidence — real MCP entry points
+
+Source reconciled at clean `df61add`, with no runtime changes from `415248a`. New code remains in opt-in test infrastructure: a sequential readiness-based JSON-RPC client, independent file-reader references, normalized workflow reports and `-Workflow Mcp` integration in the existing two-session driver. No dependencies or public APIs/schemas/caps changed. The client redirects/drains stderr, accepts protocol-only stdout, checks text/structured parity and awaits stdin shutdown/process exit. Every observation is released in `finally`; errors fail the sample rather than becoming a speedup.
+
+### Artifacts and checks
+
+- Frozen private manifest remains `u0-415248a-native/fixtures/manifest.private.json`, SHA-256 `E3FA08CBF7CFAA58AE3DAAE765032E088F76E7422B766031F8F908202A9D8868`. MCP executes the preserved `baseline-mcp/WeezTail.Mcp.exe` from the previous unit; Infrastructure/MCP runtime hashes remain those recorded above. Each process makes a new local deployment/catalog with only authorized manifest paths and separate owned active files. No remote mutation, added share or broader discovery.
+- First stdio smoke (`u0-mcp-entry-smoke-1`): 50 scenarios passed. The expanded smoke (`u0-mcp-entry-smoke-2`) passed 56 scenarios, adding complete nonmatching/matching local active sweeps at 1/10/100 files. Both servers exited zero with empty stderr, all monitor observations released and zero active indexed sessions. Four warm indexed cache entries remained intentionally until verified process exit.
+- Preserved initial measurement bundle `u0-mcp-entry-tooling-final`, harness DLL SHA-256 `7A8FD7CD42E16D351FFD986A7E9FDEBD7FC615D5BA82BB7ACC62204B4195E09B`. Byte-audit bundle `u0-mcp-entry-tooling-byte-audit`, harness DLL SHA-256 `CF2C4DF2EA2BF07A8EF12EEF8658E0DF9DC5D8BA1B73A82ED2A3BBCD43B8C14F`, adds explicit BOM-aware scan-byte equality checks and observed `BytesEvaluated` fields. Final preserved bundle **`u0-mcp-entry-tooling-complete`**, harness DLL SHA-256 `D1690608D1AA7EC3BF086CBF290FF648DE018DB568E15E97B62F541A5B32E448`, additionally records monitor release latency separately. Use this last bundle for both sides of future MCP comparisons. Earlier reports retain exact result/reference/traversal checks but lack the newer fields; keep their scope distinct.
+- `dotnet build LogReader/LogReader.Core.Tests/UncPerformanceHarness/UncPerformanceHarness.csproj -c Release -m:1 -p:UseSharedCompilation=false`: passed, 0 warnings/errors. Local `dotnet publish ... -o artifacts/measurements/unc-performance/u0-mcp-entry-tooling-final` also passed, 0 warnings/errors.
+- `dotnet build LogReader/LogReader.Core.Tests/LogReader.Core.Tests.csproj -c Release -m:1 -p:UseSharedCompilation=false`: passed, 0 errors / 4 NU1900 warnings (same unavailable NuGet vulnerability endpoint; no stale-output workaround).
+- Native `dotnet test ...Core.Tests.csproj -c Release --no-build --no-restore -m:1 --filter "FullyQualifiedName~UncPerformanceProtocolTests|FullyQualifiedName~UncPerformanceFixtureTests"`: **24 executed / 24 passed / 0 failed / 0 skipped**. Nine new tests cover compact optional errors, structured/text parity, tool/envelope failures, duplicate text and local artifact path guards. TRX: `artifacts/test-results/unc-performance/u0-mcp-tooling-focused`.
+- Final focused native filter `FullyQualifiedName~UncPerformanceProtocolTests|FullyQualifiedName~UncPerformanceFixtureTests|FullyQualifiedName~HeadlessLogQueryBackendTests|FullyQualifiedName~ResumableLogScannerTests|FullyQualifiedName~QueryContinuationStoreTests`: **273 executed / 273 passed / 0 failed / 0 skipped**. TRX: `u0-mcp-entry-focused`.
+- Affected full Core suite: **977 executed / 977 passed / 0 failed / 0 skipped**. TRX: `u0-mcp-entry-core-full`. No new concurrency regression is introduced in this tooling unit; readiness-gated backend ownership tests remain in this full suite. New U0 characterization is still outstanding. UI/desktop sources are unchanged; the earlier UI and native desktop results are not relabeled as new executions here.
+
+### Two-session baseline measurements
+
+Executed `Measure-UncPerformance.ps1 -Mode Baseline -Workflow Mcp -RunId u0-mcp-entry-baseline -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u0-mcp-entry-tooling-final -McpExecutable ./artifacts/measurements/unc-performance/u0-415248a-native/baseline-mcp/WeezTail.Mcp.exe`. Native Windows execution, two sequential seven-sample sessions, fresh sampler/server processes, warm API calls outside timing, no concurrent builds/tests. **14 processes / 784 complete measurements / zero unavailable scopes**. All fixture evidence, exact references, forward-sweep checks, replay envelopes and text/structured parity agreed; all server exits zero with empty stderr. Raw reports and `summary.json` remain local in that run directory.
+
+| Actual stdio workflow | Session 1 median (min–max), ms | Session 2 median (min–max), ms | Exact outcome |
+| --- | ---: | ---: | --- |
+| Two-file UNC snapshot search | 19.74 (18.49–22.17) | 30.16 (19.16–32.92) | 8 hit identities over 621,817 source bytes |
+| 100-file UNC snapshot search | 564.87 (541.85–587.36) | 820.11 (556.87–1,239.80) | 205 hit identities |
+| 100-file UNC count | 371.18 (358.29–388.28) | 530.50 (366.53–561.25) | 205 matching lines/occurrences |
+| 100-file UNC read, 100 lines per file | 794.20 (764.56–804.15) | 1,014.71 (770.40–1,557.69) | 10,000 exact lines / 100 calls |
+| 100-file UNC monitor initialization | 427.02 (413.37–554.09) | 619.98 (417.83–677.42) | 100 safe baselines / no history events |
+| 100-file UNC complete idle sweep | 333.65 (325.44–954.46) | 513.49 (330.26–542.39) | 100 files / 10 polls / zero events or evaluated bytes |
+| 100-file local complete idle sweep | 38.77 (38.21–40.91) | 39.27 (37.97–42.89) | 100 files / 10 polls |
+| 100-file local nonmatching append sweep | 34.01 (31.05–35.46) | 33.44 (32.48–33.97) | zero events, honest non-idle progress |
+| 100-file local matching append sweep | 33.77 (32.87–35.33) | 33.56 (32.24–34.57) | 100 exact appended events at byte offset 4 |
+| 128 MiB local snapshot search | 616.52 (602.69–648.18) | 635.30 (608.33–681.21) | complete zero-match traversal |
+| 128 MiB local count | 570.54 (547.41–608.01) | 563.84 (561.50–586.16) | complete zero-match count |
+| 128 MiB local warm indexed read | 2.09 (1.89–3.30) | 2.04 (1.94–3.42) | 100 exact lines |
+
+Real UNC session variation and the 954.46 ms idle-sweep outlier are retained. These independent baseline sessions are not a candidate comparison and authorize no retention decision; use alternating AB/BA pairs for optimization decisions. Snapshot/count metrics observed overall disk peak two (local work), UNC peak one, while reported effective global default remained two. Read/monitor admission counters are unavailable through the public protocol and are explicitly null. Maximum observed child working set 265,195,520 bytes; private bytes 228,950,016. These process values do not prove continuation-store or live scanner-buffer bounds. Forward poll progress is recorded, including checked/unchecked/backlog counts, bytes, idle and event counts. Exact per-call resource ownership remains a gated-test requirement.
+
+The MCP comparison-driver run `u0-mcp-entry-driver-validation` completed successfully: **28 processes / two seven-pair AB/BA sessions / 1,568 measurements / 112 scenario-session summaries**. It used the same preserved server on both sides to validate schema/limit guards and exact-result pairing, not to assert a speedup. All samples are retained. The driver now also rejects unequal parent measurement bundles before creating a run directory or launching a process; a deliberate comparison of the pre-audit and byte-audited bundles exercised this rejection successfully. Future MCP comparisons must use identical client/reference bundles and vary only the server binaries.
+
+Final byte audit: built/published `u0-mcp-entry-tooling-byte-audit` with Release/serial/shared-compilation-disabled settings (0 warnings/errors), then executed `LogReader.Core.Tests.exe mcp-sample <original-private-manifest> artifacts/measurements/unc-performance/u0-mcp-entry-byte-audit/report.json <preserved-baseline-mcp-exe>`. **56 scenarios passed**, all exact references/progress/replay/parity checks passed, server exited zero with empty stderr. Both search and count reported **1,679,152 evaluated bytes** for UNC 100 and **134,217,728 evaluated bytes** for local 128 MiB, matching independently calculated full frozen extents (BOM-aware). This additional audit closes full-scan evidence for zero-match large-file requests; it is not an extra optimization trial. Final scan-byte code is confined to the console harness and does not change the compiled Core test sources validated above.
+
+Cleanup/source audit: all 86 metadata lock files from the two timed MCP runs plus final byte audit were inactive under exclusive-open checks. Every recorded parent execution handle and every child server is terminal. `git diff 415248a` over App/Core/Infrastructure/MCP runtime directories and `Directory.Build.props` is empty. Artifacts and original frozen fixtures remain local/ignored. U0 stays incomplete for the UI, detailed lifecycle and missing characterization items listed above; no U1-U4 candidate is implemented or accepted.
+
+Final report audit (`u0-mcp-entry-final-audit`, execution session `15907`): built/published `u0-mcp-entry-tooling-complete` with 0 warnings/errors, then **56/56 scenarios passed**, including the scan-byte assertions. All **26 monitor scenarios** recorded release timings (maximum 0.77 ms in this audit); stdin shutdown took 15.78 ms, exit zero, empty stderr and zero active indexed sessions. Its two metadata locks were also inactive, bringing this unit's exclusive-open cleanup audit to **88 locks**. All **32 preserved baseline artifact hashes** still match the original inventory. No application/runtime source or version change was made. This final audit adds reporting/verification fields, not a new candidate timing comparison; all future acceptance pairs must run both variants through the same final client bundle.
+
+MCP-unit continuation classification: **progress** — real MCP measurement tooling and evidence committed at `380ecb8`. Its next UI/dashboard work was subsequently completed as recorded below. Preserve the original fixtures and App/MCP bundles. Detailed local lifecycle/handoff measurements and the remaining resource/characterization audit are still required before assessing U0 or editing U1 runtime behavior.
+
+## U0 execution evidence — actual UI entry points and ownership characterization
+
+Reconciled clean HEAD `cb7e008` before work. The previous goal turn is **progress** (MCP tooling and evidence committed); no process handle required resumption. Runtime source remains identical to `415248a`. UI tooling uses the existing `LogReader.Tests` friend identity in an opt-in console project under UI test infrastructure, linking the established `WpfTestHost`, lifetime guard and desktop preflight. The ordinary UI test project excludes the console entry point and compiles the shared measurement body for the native smoke. Shared fixture code gained only an explicit `System.IO` import required by WPF implicit-using rules; no fixture behavior changed.
+
+### Behavior and measured boundary
+
+- Real `MainViewModel` dashboard activation, `DashboardLoadScheduler`, `FileSession`, interactive reader, search/filter panel commands and native `LogViewportView` are exercised. Each scope has independent local JSON repositories/cache state, warms once, then measures load, first content publication, indexed reads, search, filter and shutdown. All UI setup, observations, assertions and cleanup execute inside `WpfTestHost`.
+- Tail polling is replaced by a synchronized registration-only test double. Zero registrations are required after shutdown; no polling workers exist in these samples. Default automatic scrolling is used during loading; manual scroll validation subsequently disables it. These are actual dashboard entry-point timings with polling explicitly excluded, not whole installed-application/tailing throughput claims.
+- Before/after frozen fixture evidence remains unchanged. Exact normal-reference index offsets, preview offset/text/truncation, search hit identity/text, filter line identities, indexed 100-line reads and scrolled viewport content all agree. Full view-model/load/shutdown tasks are drained before host reuse and native windows close on every successful scope. Failure drains use the existing poisoned-host protection; fixture scope cleanup also covers setup exceptions.
+- First-content rows retain `PublicationKind` and raw `PreviewMilliseconds`. All **112 measured scope publications** in the baseline were previews; no raw preview timing was missing. Use the raw preview field for the protected preview gate; generic first-content elapsed includes preview validation. Planned policy concurrency is explicitly a limit, not an observed admission peak. Working-set samples do not establish buffer/lease bounds.
+- The new gated cases hold the other local-root permit, wait for an explicit suspension/disposal readiness signal, enqueue a competing preview and prove it cannot enter until owned close/disposal returns. Cases cover incomplete suspension, cancellation while suspension ignores cancellation, and unknown-identity disposal plus admitted fallback. They assert no late index publication on shutdown, single index transfer/disposal, no advance of a nonresumable build and successful fallback. Gates are released in `finally`; counters are synchronized; all setup/assertions/cleanup are on `WpfTestHost`. These are local/fake ownership tests, not extra UNC hosts or native timeout guarantees.
+
+### Validation and preserved outputs
+
+All builds used `-c Release -m:1 -p:UseSharedCompilation=false`; tests used matching awaited builds, then `-c Release --no-build --no-restore -m:1`. Native Windows execution was used for tests/UNC/desktop measurement. No builds or tests ran alongside timed UI sessions.
+
+| Check | Actual result | Evidence |
+| --- | --- | --- |
+| UI harness build | Initial build caught missing `System.IO` implicit imports in linked fixture code; fixed explicitly. Final builds/publish passed, 0 errors / 4 NU1900 warnings for the unavailable NuGet vulnerability endpoint. | `UncUiPerformanceHarness.csproj`; preserved output below |
+| UI test project build | Passed final source, 0 errors / 6 NU1900 warnings; restore completed. | `LogReader.Tests.csproj` command output |
+| New tests focused | 4 executed / 4 passed / 0 failed / 0 skipped. | `artifacts/test-results/unc-performance/u0-ui-new-focused` |
+| Final new-test repetitions after last relevant edit | **4/4, 4/4, 4/4**, zero skips; each includes three gated ownership cases and one native window case. | `u0-ui-final-repeat-1`, `-2`, `-3` |
+| Affected service-safe focused selection | 285 executed / 285 passed / 0 failed / 0 skipped; explicitly excludes desktop cases. | `u0-ui-entry-focused` |
+| Final full service-safe UI suite | **1,506 executed / 1,506 passed / 0 failed / 0 skipped**. | `u0-ui-final-full` (earlier same-count run `u0-ui-entry-full`) |
+| Required native desktop runner | **6 executed / 6 passed / 0 failed / 0 skipped**, includes actual load/search/filter/scroll/close fixture. | `artifacts/test-results/interactive-desktop/e034210777c44a648163538113956479` |
+| Initial opt-in smoke | 40 scenarios passed; prototype before default-auto-scroll/shutdown/exact-filter reporting refinements. Retained as smoke evidence only. | `artifacts/measurements/unc-performance/u0-ui-entry-smoke` |
+| Final timed baseline | **14 processes / two seven-sample sessions / 48 scenarios each / 672 measurements**, zero unavailable scopes, all exact checks/cleanup passed. | `u0-ui-entry-baseline` |
+
+Focused new-test filter: `FullyQualifiedName~UncInteractiveCharacterizationTests|FullyQualifiedName~UncPerformanceDesktopTests`. Affected service-safe selection is V-UI's existing filter plus `UncInteractiveCharacterizationTests`, retaining `Category!=InteractiveDesktop`. Required desktop command: `./.github/scripts/Invoke-InteractiveDesktopTests.ps1 -Configuration Release`. The later narrow cleanup edit adds a `using` guard for setup failures; final repeats/full suite/desktop runner above all followed its rebuild. UI measurement code and preserved outputs were unchanged by that test-only edit.
+
+Preserved final UI bundle: repository `artifacts/measurements/unc-performance/u0-ui-entry-tooling-final`, built with `dotnet publish LogReader/LogReader.Tests/UncPerformanceHarness/UncUiPerformanceHarness.csproj -c Release -m:1 -p:UseSharedCompilation=false -o <that-directory>`. Harness DLL SHA-256 `BF8A250EF26ACDCE51E430B3C7CB5BD8EF46817EB98B29AD2F9116E519115144`; App DLL `FCFAD0FEB4C395D1F4BA7804D1EB9BEDCAF6612C02853EF88285F8324B3F5506`; Infrastructure DLL `56DB823EC671DC5298EBEE953A8706937CC9CE9B7037691F96F2DE3E9C372584`. Git metadata differs from earlier builds, but runtime source diff from `415248a` is empty. Never overwrite this UI bundle with candidate outputs.
+
+### UI baseline measurements
+
+Executed `Measure-UncPerformance.ps1 -Mode Baseline -Workflow Ui -RunId u0-ui-entry-baseline -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u0-ui-entry-tooling-final`. Manifest hash remains `E3FA08CBF7CFAA58AE3DAAE765032E088F76E7422B766031F8F908202A9D8868`. Warm/cache-uncontrolled; two sequential sessions, seven fresh-process samples each. UNC 100 remains 1,679,152 source bytes / 25,210 lines / 205 hits; local numbered 100 remains 450,700 bytes / 25,000 lines / 100 hits. Local 128 MiB and 9 MiB cases executed, not substituted for real UNC throughput. No remote writes or expanded discovery.
+
+| Actual UI workflow | Session 1 median (min–max), ms | Session 2 median (min–max), ms | Exact units |
+| --- | ---: | ---: | ---: |
+| UNC 100 dashboard load | 970.94 (955.81–1,429.49) | 964.05 (942.90–980.72) | 25,210 lines |
+| UNC 100 raw preview publication | 16.67 (12.53–22.54) | 17.08 (12.76–17.49) | selected preview validated |
+| UNC 100 UI disk search | 342.90 (336.56–352.12) | 339.20 (331.24–360.20) | 205 hit identities/text |
+| UNC 100 UI filter | 624.71 (614.93–652.68) | 632.43 (594.67–664.62) | 205 exact line identities |
+| UNC 100 indexed reads, 100 lines/file | 145.24 (133.10–150.59) | 139.45 (125.51–145.45) | 10,000 lines |
+| UNC 100 shutdown | 16.04 (14.74–18.16) | 16.02 (14.98–16.46) | drained, zero tail registrations |
+| Local 1 dashboard load | 70.70 (69.80–96.25) | 71.83 (70.42–72.24) | 250 lines |
+| Local 100 dashboard load | 1,145.28 (935.80–1,219.00) | 1,164.38 (924.85–1,212.48) | 25,000 lines |
+| Local 128 MiB dashboard load | 637.36 (631.17–649.38) | 630.13 (609.18–644.96) | 1,048,576 lines |
+| Local 128 MiB indexed 100-line read | 0.15 (0.14–0.17) | 0.15 (0.14–0.17) | 100 lines |
+
+All samples/outliers retained, including the 1,429.49 ms UNC load and variable local 100-file search/filter timings. Maximum observed sampler working set 381,227,008 bytes; this includes WPF/reference work and is not a public continuation-budget measurement. Policy planning reports two workers for the multi-file baseline root/share, not observed peak admission. All 224 per-scope metadata locks (warm + measured) were inactive under exclusive-open checks after process exit. Native windows and view models are drained; local evidence remains ignored. Candidate decisions still require fresh alternating AB/BA pairs against the preceding accepted runtime, not comparisons of these standalone medians.
+
+Current U0 acceptance remains open for detailed local encoding/lifecycle/handoff measurement and the remaining admission/buffer/ordered-budget coverage audit. U1-U5 remain unstarted; no runtime candidate was implemented or accepted in this unit.
+
+UI-unit continuation classification: **progress** — UI tooling, 672 actual measurements, required real window smoke and three repeated gated cases committed at `2f81e4d`. Its remaining lifecycle/resource work was completed in the following unit. All 32 original baseline artifact hashes still match; preserve the frozen manifest and final component/UI/MCP bundles.
+
+## U0 execution evidence — local lifecycle and resource characterization
+
+Reconciled HEAD `2f81e4d` plus its documentation checkpoint `4a9e41f`; no runtime edits or active owned work preceded this unit. Added 22 local lifecycle scenarios to the maintained MCP sampler, bringing each process to 78 scenarios. All writes, renames and deletes target files generated in that process's isolated local deployment; no manifest source or remote fixture is mutated. Replacement retains the old file under a separate owned name to prevent immediate file-ID reuse. Temporary disappearance restores the same generation and proves continuation from its retained boundary.
+
+The recipe executes all interior splits of é/€/😀 with and without UTF-8 BOM, incomplete UTF-16 code-unit completion, ANSI, unfinished regex match/removal/rematch, split CRLF, changed-file errors beside healthy progress, temporary disappearance/reappearance, and search/count handoff at a frozen source boundary. Handoff receives the first UTF-8 byte after the snapshot but before monitor creation, then delivers the completed character exactly once. Exact ordered event identities/text, generations, partial/error/stopped states, progress, replay and structured/text parity are checked. Forward response durations are summed; mutation, baseline setup and replay checks are excluded, and release latency is recorded separately. Error cases are explicit partial correctness measurements, not successful-throughput claims.
+
+An initial smoke rejected the harness's explicit empty inclusion query (the protocol requires null or a nonempty predicate); corrected to null. A later smoke rejected the harness's attempted replay of handoff creation: repeating a handoff intentionally starts an independent observation. Replay checks now apply to monitor cursor polls. These were measurement assertion errors; no runtime behavior was changed or relaxed. The final smoke `u0-mcp-lifecycle-final-smoke` passed **78/78 scenarios**, server exit zero, empty stderr, no unavailable scope and zero active indexed sessions. Preserved final bundle `u0-mcp-lifecycle-tooling-final`, harness DLL SHA-256 `67AB747EB1091DD847F2B24F2F6FFAAD9C88112B8A52AB0574FA13BFE64C43F6`. Use this identical measurement bundle on both sides of future MCP candidate comparisons; vary only the server artifacts. Preserve the earlier bundles and evidence.
+
+### Characterization audit
+
+| U0 requirement | Executed evidence and bound |
+| --- | --- |
+| Interactive ownership, fallback and cleanup | Three `UncInteractiveCharacterizationTests` cases from `2f81e4d`: admission retained through suspension/unknown-build disposal, cancellation cannot publish late, fallback never advances a disposed build. UI full 1,506/1,506 and native desktop 6/6 remain the latest unchanged-UI results. |
+| Interactive quanta, yield and generation | Existing `InteractiveLogReaderTests`: multi-quantum exact offsets across five encodings; priority yield before/during a quantum; replacement/shrink/boundary rewrite restart; encoding changes; cancellation disposal and single transfer. First-turn advancement is intentionally absent at baseline and is U1's changed-behavior requirement. |
+| Complete scanner-buffer lifetime | Eight new `ScannerLifetime_IncludesBlockedDisposalAndDrainsBeforeResponse` cases use real scanners and count ownership before open through real disposal, with the first disposal readiness-gated and uninterruptible. Search/count peak two lifetimes; baseline monitor initialization/poll peak one. Normal and cancelled requests cannot finish while disposal owns the buffer; zero live ownership and matching open/dispose counts afterward. One 256 KiB rented buffer per scan fits the existing 512 KiB per-request reservation, including disposal. |
+| Ordered aggregate monitor budgets | New `Monitor_TotalBudgetRetainsUnconsumedSlotAndOrderedSweepProgress`: 16 hot files consume exactly 4 MiB, the seventeenth remains unchecked, replay is identical, the next call delivers the quiet file's exact offset-4 event, and the next sweep drains all 16 partial lines. Backlog counts only observed growth (16), while unchecked count separately reports the unseen quiet slot. Initial incorrect expected backlog 17 failed and was corrected to the documented observed-state semantics. |
+| Admission, detached work and shutdown | Existing backend global/UNC bounds, queued-UNC/local interleave, blocked-probe cancellation/disposal and monitor controlled-UNC tests; all included in the affected/full Core runs. These are controlled/fake topology proofs, not additional real network targets. |
+| Continuation memory and transaction safety | Existing `QueryContinuationStoreTests`: bounded working reservations, oversized-commit rollback, transfer/release, expiry/session capacity and replay; monitor cancellation/catalog/period/scope-cap tests and UTF-8 lifecycle coverage all pass in the full suite. Public values and reservation formula are unchanged. |
+| Real measurements and absent diagnostics | Component, UI and MCP baseline reports retain normalized counts/digests, timing ranges, wire bytes, memory samples and cleanup. Existing search/count statistics observe disk/UNC peaks. Public read/monitor counters and real UI admission peaks are unavailable; null/planned values remain explicit, with controlled ownership/admission tests providing the corresponding correctness bounds. No claim derives a live buffer count from working set or a real admission peak from a policy limit. U3/U4 must extend proofs for changed scheduling. |
+
+### Validation
+
+- Harness Release build/publish: zero warnings/errors. Core Release build: zero errors / four NU1900 warnings for the already unavailable vulnerability endpoint; restore completed. Serial MSBuild and shared compilation disabled.
+- New lifetime cases first passed **8/8**. Combined final resource selection passed **9/9**; three required repetitions after the final semantic edit passed **9/9, 9/9, 9/9**, zero skips. TRX directories `u0-resource-final-focused` and `u0-resource-repeat-1` through `-3`.
+- Affected backend/scanner/continuation/measurement selection: **282/282**, zero skips, `u0-lifecycle-resource-affected`.
+- Full affected Core suite: **986/986**, zero skips, `u0-lifecycle-resource-core-full`. All tests use native Windows after the matching awaited build; no sandbox startup result is counted as a pass. New files subsequently received only matching CRLF line endings.
+- UI source/linked measurement files are unchanged by this unit; the earlier full service-safe UI **1,506/1,506** explicitly excluded desktop tests, and the separate native desktop **6/6** remains valid U0 evidence. Final integrated solution/desktop validation is still U5 work.
+
+### Extended baseline and U0 decision
+
+Executed `Measure-UncPerformance.ps1 -Mode Baseline -Workflow Mcp -RunId u0-mcp-lifecycle-baseline -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u0-mcp-lifecycle-tooling-final -McpExecutable ./artifacts/measurements/unc-performance/u0-415248a-native/baseline-mcp/WeezTail.Mcp.exe`. **14 fresh processes / two seven-sample sessions / 1,092 measurements**, including **308 lifecycle measurements**, zero unavailable scopes. APIs/scenarios warm outside timing; no builds/tests ran concurrently. All exact reference/event/progress/replay/parity checks passed, every server exited zero with empty stderr and zero active indexed leases. Raw samples/outliers are retained.
+
+| Local lifecycle forward workflow | Session 1 median (min–max), ms | Session 2 median (min–max), ms | Exact events |
+| --- | ---: | ---: | ---: |
+| Four-byte UTF-8, split after byte 3, BOM | 3.32 (3.17–4.29) | 3.50 (3.27–9.07) | appended + updated, same identity |
+| UTF-16 half-unit | 1.78 (1.52–7.06) | 1.75 (1.68–2.19) | 1 after completion |
+| ANSI | 0.81 (0.71–0.92) | 0.76 (0.65–0.87) | 1 |
+| Unfinished match/removal/rematch | 5.04 (4.70–6.21) | 5.18 (4.60–5.58) | 3, same offset/generation |
+| Split CRLF | 1.86 (1.73–1.92) | 1.84 (1.71–5.26) | 3 exact offsets |
+| Missing/reappearance | 2.23 (2.02–2.35) | 2.27 (1.92–5.76) | healthy + returned file |
+| Search handoff | 1.78 (1.70–1.91) | 1.92 (1.80–2.25) | 1 after source boundary |
+| Count handoff | 1.79 (1.73–2.21) | 1.92 (1.60–2.51) | 1 after source boundary |
+
+Replacement/truncation/encoding partial-error scenarios also passed all 14 samples each; their forward-call medians are approximately 0.93–1.05 ms with exactly one healthy-file event. Full ranges and all 12 UTF-8 split variants are in `summary.json`. Maximum sampled child working set 273,866,752 bytes, private bytes 238,112,768; maximum monitor release 0.9038 ms and shutdown 15.8484 ms. These sampled memory values are not live-buffer bounds. All **28** run metadata locks were inactive under exclusive-open checks after completion. All execution handles, including baseline `69481` and full-suite `23403`, are terminal. All **32** original baseline inventory hashes match; manifest SHA-256 remains unchanged. Runtime source diff from `415248a` is empty and version/default/public contracts are unchanged.
+
+**U0 accepted.** Reproducible tooling, exact component/UI/MCP/lifecycle baselines, required native window smoke, repeated new ownership tests, full affected suites and resource audit are complete. Disclosed limits remain: warm/cache-uncontrolled small UNC fixtures, no suitable large real UNC file, registration-only tail double in UI measurements, absent public read/monitor admission counters and no real UI admission instrumentation. Controlled tests prove the relevant bounds; absent metrics are not mislabeled as observations. No optimization is accepted by this baseline decision. U1 may now begin; U1-U5 outcomes remain pending.
+
+## U1 candidate — first quantum correctness work
+
+Baseline/checkpoint reconciled at `ed345c8`. The candidate advances a resumable build under its creation lease, with an explicit null guard for unknown-identity fallback. It publishes the initial progress/attempt before scanning: this preserves the existing Indexing UI state and lets a restart during the very first quantum trigger auto-encoding recovery. An existing opened handle now receives the same identity/time/prefix/boundary continuity check as a reopened handle, without adding a reopen. All existing quantum, generation-attempt, encoding-change, preview and policy limits remain unchanged.
+
+The minimal first-turn edit initially passed the five direct ownership cases, but existing dashboard tests caught missing initial Indexing progress and missed replacement-encoding recovery. Publishing the attempt fixed path replacement; the retained-handle continuity check was also necessary for in-place growth/rewrite. No assertion, timeout or gate was weakened. New Core cases change same-size/growing files between creation and first advance and require attempt two with exact normal-reference offsets. The two new UI cases prove uncontended completion without suspension/reopen and a preview enqueued during creation forcing a yield, retained close ownership, then revalidation on the next lease. All setup, assertions and cleanup run in `WpfTestHost`.
+
+Two additional failed-advance cases reproduced a separate admission-order bug: an exception released the lease before the outer `finally` disposed the still-open build. Disposal now drains inside that lease before rethrow, aggregating original and cleanup exceptions if both fail. Normal and shutdown-during-disposal cases both prove a competing preview remains queued until close returns, no late publication and single disposal/transfer. Reader `DisposeAsync` releases owned index storage in `finally` when stream close fails. These changes preserve the design's ownership contract rather than accepting a faster failure path.
+
+Validation so far (native Windows, matching awaited Release builds; serial/shared-compilation-disabled): final Core build zero errors/four NU1900 warnings; UI zero errors/seven NU1900 warnings (same unavailable vulnerability endpoint). Initial stale-output invocation selected zero tests while a build was still running and is explicitly invalid (`u1-first-quantum-red`); after waiting for completion, the new regression executed and failed on the baseline's one avoidable suspension (`u1-first-quantum-baseline-failure`). Early affected/full UI results failed the strict progress/replacement assertions, and early failed-advance ownership tests failed as intended. These do not count as acceptance passes.
+
+- Final current reader/encoding/index focused selection: **44/44**, `u1-ownership-core-focused`.
+- New Core continuity repetitions after the last runtime edit: **2/2, 2/2, 2/2**, `u1-ownership-core-repeat-1` through `-3`.
+- Final current first-quantum/ownership/strict preview/replacement selection: **10/10**; required repetitions **10/10, 10/10, 10/10**, `u1-ownership-ui-focused` and `u1-ownership-ui-repeat-1` through `-3`.
+- Affected service-safe UI selection: **289/289**, `u1-ownership-ui-affected`; explicitly excludes desktop.
+- Full current Core: **988/988**, zero skips, `u1-ownership-core-full` (execution `18931`, terminal).
+- Full current service-safe UI: **1,510/1,510**, zero skips, `u1-ownership-ui-full` (execution `82965`, terminal). Earlier pre-failure-hardening full passes **988/988** Core and **1,508/1,508** UI in `u1-continuity-*` are historical and not substituted for current-source validation.
+- Required native desktop runner: **6/6**, zero skips, `artifacts/test-results/interactive-desktop/8ef5ac55c962442981a6d078cad81784`.
+
+Correctness is validated; no U1 retention decision exists yet. Local trial commit **`f52532d`**, `perf: trial first interactive quantum under its initial lease`. Runtime files are only `FileSession.cs` and `ChunkedLogReaderService.Interactive.cs`, with focused Core/UI regression additions. Required full/native checks are terminal. Published a separate Release UI candidate bundle `u1-first-quantum-ui-candidate` from that commit, awaiting publish execution `30664` to terminal success before measurement; the persistent NU1900 warnings remain environmental. Candidate hashes: harness `462C60526A15BB6A521E1D3268406F077DD54EC70FA128B0391DD931E9EEE01D`, App `9647976F3A7C8A2BFFF665FA126DE6C638A5F341E8BF62C57552A9D0A4C5EF83`, Infrastructure `EBF7F0ACCF40D31315441A8D587E1080F3F628D5E30B5C06E829630F117DD820`.
+
+The first two-session seven-pair AB/BA comparison, native execution `95386`, run ID `u1-first-quantum-ui-comparison`, stopped with exit one after **23/28** complete process reports. The next process threw `UnauthorizedAccessException` at `local-100/reference`; no acceptance summary exists. Retain every completed/outlier report and the incomplete run separately. Its first session's primary paired median ratio was 0.9860, insufficient by itself; this incomplete run cannot support a retention/rejection decision. No timeout, retry of an individual failed sample, permission or network setting was changed.
+
+Local audit after failure verified all **100** numbered frozen fixture hashes, approximately 718 GB free disk space, and **373** inactive metadata/owner locks under exclusive-open checks. The precise failed local operation is not established. Added bounded failure diagnostics to the UI console entry point: HRESULT and at most eight method names, with no exception messages, source paths or log text. Release publish completed before a fresh full smoke `u1-ui-diagnostic-smoke` passed **48/48**, zero unavailable scopes and all owned work drained (execution `33693`, terminal). This changes only failure diagnostics, not the `ui-v1` measurement body or timing.
+
+Restarted the entire comparison as native execution `33026`, run ID **`u1-first-quantum-ui-comparison-restart`**, original fixture ID `u0-415248a-native`. Both variants use the identical diagnostic client DLL SHA-256 **`DEC3D702306A12F786D36A7B563CA488A6286C2583A72EA459F855542DECA897`**. Baseline bundle `u1-ui-diagnostic-baseline` is a new local copy of `u0-ui-entry-tooling-final`, replacing only harness DLL/PDB; baseline App/Infrastructure hashes remain `FCFAD0FEB4C395D1F4BA7804D1EB9BEDCAF6612C02853EF88285F8324B3F5506` / `56DB823EC671DC5298EBEE953A8706937CC9CE9B7037691F96F2DE3E9C372584`. Candidate bundle `u1-ui-diagnostic-candidate` retains the exact `f52532d` App/Infrastructure hashes recorded above. Original baseline bundles are untouched.
+
+This restart completed successfully: **28 processes / two seven-pair AB/BA sessions / 1,344 measurements**, all exact-result/preview checks and owned-work drains passed. All **448** metadata/owner locks were inactive under exclusive-open checks; `33026` is terminal with exit zero. `decision-audit.json` retains all workflow ranges, paired ratios and protected/raw-preview checks, alongside the driver's raw reports and summary. No outliers were removed.
+
+| First complete comparison | Session 1 | Session 2 |
+| --- | ---: | ---: |
+| UNC 100 dashboard baseline median (min–max), ms | 971.27 (949.74–990.97) | 967.38 (952.09–1,063.86) |
+| UNC 100 dashboard candidate median (min–max), ms | 967.72 (952.17–977.43) | 965.87 (948.59–1,430.09) |
+| Primary paired median B/A; required <=0.85 | **0.9956, fail** | **1.0028, fail** |
+| Protected local failures | Local 100 load: 962.27 -> 1,103.54 ms (+141.28 / 14.68%) | Local 100 search: 104.64 -> 141.79 ms (+37.16 / 35.51%); filter: 124.57 -> 206.93 ms (+82.36 / 66.12%) |
+| Raw preview regression gates | None exceeded | None exceeded |
+
+Per the fixed decision rule, the **single full two-session repeat** is now running, run ID **`u1-first-quantum-ui-comparison-repeat`**, native execution **`82154`**, identical diagnostic bundles/fixture and no candidate/threshold changes. The incomplete earlier run is excluded, rather than pooled with these 28 processes. Resume the repeat handle; do not duplicate, build or test during timing. A still-inconclusive or regressing candidate must be rejected with focused restoration and documented correctness-only scope. No retention decision yet; U2 remains unstarted.
+
+## U1 repeated measurement outcome and focused restoration
+
+The required repeat `u1-first-quantum-ui-comparison-repeat` completed with exit zero (execution `82154`, terminal): **28 processes / two seven-pair sessions / 1,344 measurements**, all exact results/publication checks passed and owned work drained. Both complete comparisons together provide **56 processes / four seven-pair sessions / 2,688 measurements**; the earlier incomplete 23-report run remains excluded. Both variants used identical diagnostic clients and the exact preserved baseline/trial App/Infrastructure binaries, with unchanged fixture and thresholds. No builds/tests ran during timing and no outliers were removed.
+
+| Required repeat | Session 1 | Session 2 |
+| --- | ---: | ---: |
+| UNC 100 dashboard baseline median (min–max), ms | 991.45 (963.55–1,348.00) | 974.91 (963.43–1,005.20) |
+| UNC 100 dashboard trial median (min–max), ms | 971.98 (961.90–988.43) | 975.82 (953.00–1,314.74) |
+| Primary paired median B/A; required <=0.85 | **0.9753, fail** (2.47% improvement) | **0.9976, fail** (0.24% improvement) |
+| Protected workflow failures | None | Local 100 search: 96.15 -> 215.59 ms (+119.44); filter: 155.42 -> 234.82 ms (+79.41); UNC 1 load: 106.61 -> 118.14 ms (+11.53). Each exceeds both 10% and 5 ms. |
+| Raw preview regression gates | None exceeded | None exceeded |
+
+Full per-workflow min/max/medians and raw-preview gates are retained in the repeat's `decision-audit.json`, alongside raw reports and driver summary. All **448** repeat locks were inactive under exclusive-open checks; together with the first complete comparison that is **896** inactive locks. All **32** original baseline artifact hashes still match, and manifest SHA-256 remains `E3FA08CBF7CFAA58AE3DAAE765032E088F76E7422B766031F8F908202A9D8868`. UNC access stayed read-only within the allowed subtree; no fixture substitution or remote mutation occurred.
+
+**Decision: reject U1's first-turn performance optimization.** Neither complete comparison met the primary requirement, and the single permitted repeat still exceeded protected limits. Restore creation-turn suspension and ordinary post-lease progress/attempt publication; remove only the two feature-specific tests asserting the rejected first-turn behavior. The trial and its proof remain reviewable at `f52532d`. No first-turn speedup is shipped and no performance pass is claimed for the restored runtime.
+
+Retain independently required correctness fixes exposed by the trial: failed-advance disposal drains before admission release; original and cleanup errors retain context; unknown-identity fallback is guarded; direct interactive reader advancement validates an existing initial handle; index storage is released if stream close fails. The retained failure tests work with the restored initial suspension and keep their strict blocked-preview/no-late-publication assertions. The two first-quantum rewrite tests also remain valid for the reader interface itself. These fixes preserve required ownership/continuity contracts rather than retaining the rejected scheduling behavior. All resource caps/defaults, scan/encoding/restart limits, public APIs and MCP schemas remain unchanged.
+
+Final source review added a third retained Core regression: `ResumedHandle_MetadataFailureRemainsOwnedUntilBuildDisposal`. An injected metadata failure after reopening left a captured real `SafeFileHandle` open after build disposal; the test reproduced that leak (`u1-resumed-handle-red`). Assigning the reopened stream to the build immediately, before metadata inspection, closes it through ordinary build disposal on failure. The test records closure before its own unconditional handle cleanup, so failures cannot leak the reproduced native handle. This is a correctness-only ownership fix and does not add I/O to successful operation.
+
+Final restoration validation: matching awaited Core/UI Release builds passed (zero errors, four/seven existing NU1900 warnings). Core focused **45/45**; retained Core cases repeated **3/3, 3/3, 3/3** after the final runtime edit (`u1-final-core-repeat-*`). UI strict ownership/preview/replacement cases repeated **8/8, 8/8, 8/8** (`u1-final-ui-repeat-*`); affected service-safe UI **287/287** (`u1-final-ui-affected`). Final full Core **989/989**, zero skips (`u1-final-core-full`, execution `58733` terminal); final full service-safe UI **1,508/1,508**, zero skips (`u1-final-ui-full`, `68841` terminal). Required native desktop runner **6/6**, zero skips, `artifacts/test-results/interactive-desktop/2d770f420fb8402f9cfcc6813d9edc45`. Service-safe UI explicitly excludes those desktop cases. Prior restoration passes precede the final native-handle fix and are not substituted for these current-source results. No owned process, window, task or lease remains.
+
+**U1 closed: rejected performance candidate, restored scheduling, retained correctness only**, committed at **`ae75ae2`**. The single native-handle ownership assignment adds no successful-path I/O; no new timing claim is made for it. File/network operations stay within their existing read-only application contracts; no authorization, network/SMB/security setting or permission changed. All protected/public budgets and MCP default global disk concurrency two remain unchanged. U2 may proceed, preserving a newly built preceding-runtime baseline before editing; U3-U5 remain pending. Final solution-wide acceptance is still U5 work, so the overall goal remains active.
+
+Latest continuation classification: **progress** — U0 accepted at `ed345c8`; U1 trial assessed with 2,688 valid paired measurements, rejected under the fixed rule, restored and correctness-only changes committed at `ae75ae2`. Final source is buildable and validated, all execution handles/resources are terminal/drained, and the tree was clean before this documentation checkpoint. Next begin U2 after preserving a fresh baseline bundle from this runtime. Do not rerun U0 or the rejected U1 trial, overwrite frozen artifacts or raise MCP's global default. Overall goal remains active; U2-U5 outcomes and final solution validation remain outstanding.
+
+## U2 candidate — four-worker UI topology bounds
+
+Reconciled clean HEAD `1e78a96`; the preceding turn is **progress** (completed U0 and rejected/restored U1 with retained correctness). No prior live handles required resumption. Published/preserved `u2-ui-baseline` before editing runtime, awaiting publish `6147` to terminal success. Release serial/shared-compilation-disabled; only existing NU1900 endpoint warnings. Baseline harness SHA-256 `DE351861136D614A1B83E506896267560EF55C1706CE3762EBA298DC81291E11`; App `E4B3B908072E5A4BE4FEBD1DCD03A6420D4FFB0D6ADE2273B5318E8DD15DD56B`; Infrastructure `D11BAF5643D70A596C7E414DBC81BEBC559F6FBF9FD1871B93C589846C9270DD`; Core `E22D41DDE494119628D034A08841601D7C56A304E0D32DA0782E3DDF450662E9`.
+
+Trial changes: dashboard UNC host 2 -> 4, search/filter host 3 -> 4, share 2 -> 4. Scheduler plan input expands from two to four synthetic instances of its path so target-count clamping cannot silently retain the old two-worker bound. Global dashboard/search limits 24/32, local root two, unknown one, selected-preview reservation, foreground priority and single background operation are unchanged. No new setting/API/dependency, new real network target, first-turn scan or MCP global/admission change.
+
+Nine new Core policy/gate cases cover all three operations: ordinary/case/extended UNC aliases, one host across two shares, separate hosts, mixed local/unknown limits, aggregate caps, queued cancellation after partial permit acquisition, complete drain and a fresh full batch proving capacity recovery. Two new scheduler cases admit four foreground slots across normalized aliases or multiple shares, block a fifth same-host request, allow another host/local/unknown work, prioritize a pending preview and cancel/drain queued work in `finally`. These use path strings only; no fake host/share is accessed. Existing background/global/foreground tests remain. Intentional old cap assertions were updated; the two changed search concurrency tests now use explicit four-worker readiness and release gates instead of startup sleeps. Shared counters remain synchronized, waits bounded and work drained. New files/edits match CRLF; the post-build line-ending normalization was cosmetic only.
+
+Validation: matching Core/UI Release builds passed, zero errors/four Core and six-to-seven UI existing NU1900 warnings (WPF temporary build changes the warning count). Focused Core **20/20**, scheduler **10/10**; required Core repeats **11/11, 11/11, 11/11**, initial UI repeats **10/10, 10/10, 10/10**, all zero skips. Evidence `u2-core-new-focused`, `u2-ui-new-focused`, `u2-core-repeat-1` through `-3`, `u2-ui-repeat-1` through `-3`. Affected Core policy/search/filter **113/113**, `u2-core-affected`; full Core **998/998**, zero skips (`u2-core-full`, `12672` terminal).
+
+Initial full service-safe UI `u2-ui-full` failed **3/1,510** (`88865` terminal): two plain-reader UNC admission cases still held only two slots and therefore could not assert saturation under a four-slot candidate; the existing clear-modifier test observed a concurrent member collection through `TestUiDispatcher`'s immediate path and threw `NullReferenceException`. Fill all four UNC slots (three held peers plus the controlled full reader), retaining both strict blocked-admission/shutdown assertions and bounded setup cancellation. Local-root setup remains two slots. Move the clear-modifier case's setup/observations/cleanup into `WpfTestHost`, await explicit member-refresh drain, and drain VM shutdown before host reuse. Remove its polling sleeps; do not add null guards to production notification code, increase timeouts, weaken assertions or disable parallelism. Preserve the file's unrelated mixed line endings and normalize only the changed method's formatting.
+
+After the final test-only corrections/rebuild: **17/17** focused (`u2-ui-final-focused`); required repeats **17/17, 17/17, 17/17** (`u2-ui-final-repeat-1` through `-3`); expanded affected UI **296/296** (`u2-ui-final-affected`, `74359` terminal); final full service-safe UI **1,510/1,510**, zero skips (`u2-ui-final-full`, `91447` terminal). Separate required native desktop runner **6/6**, zero skips, `artifacts/test-results/interactive-desktop/5cc12c9a82114152af3513474367fe31`. Service-safe selections explicitly exclude that category. No runtime edit occurred after the original repeated Core/scheduler coverage; final fixture edits were confined to UI tests, followed by their final repeats/full/native runs.
+
+U2 candidate correctness is validated and preserved in local trial commit **`52bfedf`**, `perf: trial four-worker UI UNC scheduling`. Awaited Release publish `40023` to terminal success before timing, preserving separate bundle `u2-ui-candidate`. Candidate harness SHA-256 `47D32EC6BB05D8DA2D04F31FED387334B07F94EDD51D34A910A59C46021F8972`; App `0420D80FA5A2D70FBA169E03DA1EE06B8B2214CBF1F4AF74ED3E7986F4C65216`; Infrastructure `DF9EBEE77F2633C4F09FF1A94603BA4D2C758F9DEA020A3B9D0C064662B61F74`; Core `34B2FCE7017B1ABD9B6BA4AA15FC3CC7EDB604D3AF2068A80AEDCBF00A24D1B2`. UI measurement source/recipe is unchanged from the preserved baseline; runtime assembly Git metadata changes with the trial commit. No original bundle was overwritten.
+
+Executed `Measure-UncPerformance.ps1 -Mode Compare -Workflow Ui -RunId u2-ui-comparison -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u2-ui-baseline -CandidateDirectory ./artifacts/measurements/unc-performance/u2-ui-candidate`. Native execution **`99166` is running**, two sequential seven-pair AB/BA sessions, fresh processes and untimed warmup, no concurrent builds/tests. First completed processes pass all 48 exact-result/scoped-read/publication/drain scenarios, zero unavailable scopes. No retention decision yet. Resume `99166`; do not relaunch solely because observation expires. Primary is UNC-100 **ui-search**, paired B/A <=0.85 in both sessions; retain all local/single-file, raw-preview and other workflow checks. Repeat the whole comparison once if required by the fixed rule, then accept/reject without changing thresholds. Preserve all baseline/fixture artifacts; keep builds/tests idle during timing. U3-U5 remain unstarted.
+
+### First complete U2 comparison
+
+Execution `99166` completed with exit zero: **28 processes / two seven-pair AB/BA sessions / 1,344 measurements**, zero unavailable scopes, exact results/publication checks and owned-work drains passed. All **448** metadata/owner locks were inactive under exclusive-open checks. `decision-audit.json` retains all workflow ranges, paired ratios, protected medians and raw-preview gates; no outlier was removed. Measurement source/recipe and frozen manifest are unchanged.
+
+| First U2 comparison | Session 1 baseline -> trial median, ms | Session 2 baseline -> trial median, ms |
+| --- | ---: | ---: |
+| Primary UNC 100 UI search | 343.32 (264.96–367.88) -> 167.84 (157.57–174.06) | 354.67 (336.63–370.77) -> 169.48 (154.35–179.23) |
+| Primary paired median B/A; required <=0.85 | **0.4797, pass** (52.03% improvement) | **0.4828, pass** (51.72% improvement) |
+| UNC 100 dashboard load | 982.55 -> 784.71 | 1,002.13 -> 780.04 |
+| UNC 100 UI filter | 620.37 -> 445.06 | 635.54 -> 444.48 |
+| Protected local 100 indexed reads | **23.96 -> 32.02, fail** (+8.06 ms, >10%) | **25.84 -> 32.98, fail** (+7.14 ms, >10%) |
+| Protected local 100 UI search | **59.20 -> 139.94, fail** (+80.74 ms, >10%) | **52.35 -> 147.51, fail** (+95.16 ms, >10%) |
+| Protected local 100 UI filter | No failure | **120.07 -> 137.21, fail** (+17.14 ms, >10%) |
+| Raw preview regression gates | None exceeded | None exceeded |
+
+The primary requirement passes, but **five protected workflow/session medians fail** the fixed 10% plus 5 ms gate. Do not trade these away or infer their cause from unchanged local caps. Per the rule, the **single complete two-session repeat** is now running as native execution **`17230`**, run ID **`u2-ui-comparison-repeat`**, with the exact same bundles, fixture and thresholds. Initial repeat reports pass their 48 exact-result/cleanup scenarios. Resume this handle; do not duplicate, rebuild, test or change measurement methodology during timing. A still-regressing candidate must be rejected with focused restoration. U3-U5 remain unstarted.
+
+### Interrupted repeat and replacement execution
+
+Execution `17230` is terminal, exit one, after **13 complete reports**. The next process failed at `local-100/ui-filter`: bounded diagnostics report `UnauthorizedAccessException`, HRESULT `80070005`, in `FileSystem.MoveFile` through `JsonStore.SaveToFileAsync`. This was local JSON persistence, not a UNC read. Preserve the incomplete run and exclude it from acceptance statistics. Exclusive-open audit confirms all **214/214** owner locks inactive; the working tree was clean and local disk space was sufficient. Source review shows temporary-file serialization followed by an overwrite move; the available evidence does not establish a persistent permission fault or justify changing production persistence behavior.
+
+Restarted the entire required two-session repeat, unchanged frozen bundles/manifest/recipe/thresholds, as `u2-ui-comparison-repeat-complete`, native execution **`26793`**. This replaces the incomplete attempt rather than adding a second decision repeat. Resume `26793`; no builds or tests during timing. A completed comparison is still required before deciding U2. No performance optimization has been accepted and U3-U5 remain pending.
+
+### Local fixture seeding diagnosis and ui-v2 tooling
+
+Execution `26793` is terminal, exit one after **two complete reports**, with the same local move failure. All **38/38** owner locks are inactive. Inspection of its retained temporary JSON establishes the location: **69 pending entries versus 68 saved entries**, in the measured local-100 scope, ordinary Archive attributes. The failure occurred during sequential untimed `AddAsync` fixture seeding, not UI filtering; the stage label retained the prior warm scope's last operation. No evidence establishes the external cause of the denied move. A separate unchanged-runtime diagnostic sample (`38433`, terminal zero) passed all **48** scenarios, illustrating that the fault is intermittent rather than proving it fixed.
+
+The file repository's batch registration assigns new IDs, so it cannot directly preserve fixture labels. Instead, recipe **`ui-v2`** seeds the same stable-ID versioned fixture envelope once via existing `JsonStore`, then loads/validates every ID/name/path through the real repository before constructing the VM. This removes repeated whole-store setup rewrites without changing production persistence, measured operations, source fixtures, timing thresholds or failure handling. Reset the stage for every scope and extend bounded method-only diagnostics from eight to 24 frames. No exception suppression, retries, permissions/security changes or remote writes. Older ui-v1 evidence remains separate; start a fresh full ui-v2 comparison with identical new clients and frozen preceding/trial runtime binaries, then apply the original repeat/decision rule if required. Do not pool recipes or claim acceptance from the earlier first comparison.
+
+Expanded the required native-window smoke to one and 100 local files. Awaited matching UI build passed, zero errors/six existing NU1900 warnings. Focused **2/2**, three consecutive repeats **2/2, 2/2, 2/2** (`u2-seeding-focused`, `u2-seeding-repeat-*`); full service-safe UI **1,510/1,510**, no skips (`u2-seeding-ui-full`, `85249` terminal); separate required desktop **7/7**, no skips, `interactive-desktop/e86b43a083b34c10abb604a6f5aee9cc`. Cosmetic CRLF checks preserved existing endings. The earlier `3752` diagnostic publish and sample `38433` are terminal; no owned run is live at this tooling checkpoint. U2 runtime remains the unaccepted four-worker trial. Next publish/freeze ui-v2 clients alongside, never over, original bundles and run a fresh comparison. U3-U5 remain pending.
+
+Tooling committed at **`48afbc7`**, `test: seed UI measurement fixtures once and verify full scope`. Awaited ui-v2 client publish `20386` to terminal zero, then cloned original bundles to **`u2-ui-v2-baseline`** and **`u2-ui-v2-candidate`**, replacing only the harness executable/DLL/PDB with the same client. Client DLL SHA-256 is **`821C8C700C1DE9FB09C327D06770E90210D1C73177F2FDE9E003A80FD9B54A85`** on both sides. All six App/Infrastructure/Core hashes match their original frozen variants exactly (see U2 hashes above); local `u2-ui-v2-provenance.json` records these checks. Original bundles remain untouched.
+
+Fresh `Measure-UncPerformance.ps1 -Mode Compare -Workflow Ui -RunId u2-ui-v2-comparison -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u2-ui-v2-baseline -CandidateDirectory ./artifacts/measurements/unc-performance/u2-ui-v2-candidate` is running as native execution **`78038`**. First **three** reports each pass all **48** exact-result/publication/cleanup scenarios, no unavailable scopes. Resume this handle; do not relaunch from observation expiry or build/test during timing. Apply the fixed acceptance/repeat rule to this new recipe's complete evidence; do not pool with ui-v1 or infer a pass from partial reports. Current continuation classification: **progress**, measurement reliability tooling validated/committed, U2 acceptance still pending and U3-U5 remain unstarted. All other handles are terminal; only the documented comparison owns ongoing work.
+
+### First complete ui-v2 comparison and required repeat
+
+Execution **`78038`** completed with exit zero: **28 processes / two seven-pair AB/BA sessions / 1,344 measurements**, zero unavailable scopes, all exact-result/publication/owned-work checks passed. All **448/448** owner locks were inactive under exclusive-open audit. Every scope had seven raw-preview observations per variant/session; no preview regression gate exceeded. Local `decision-audit.json` retains every workflow range, median and paired ratio; no sample/outlier was removed and no ui-v1 result was pooled. The working tree was clean before recording this outcome.
+
+| First ui-v2 U2 comparison | Session 1 baseline -> trial, ms | Session 2 baseline -> trial, ms |
+| --- | ---: | ---: |
+| Primary UNC 100 UI search median (min-max) | 357.97 (345.84-383.73) -> 175.22 (166.64-187.32) | 362.52 (350.21-389.37) -> 173.97 (161.53-177.66) |
+| Primary paired median B/A; required <=0.85 | **0.4798, pass** (52.02% improvement) | **0.4787, pass** (52.13% improvement) |
+| UNC 100 dashboard load median | 1,034.19 -> 829.94 | 1,024.10 -> 804.28 |
+| UNC 100 UI filter median | 639.23 -> 458.30 | 648.40 -> 448.74 |
+| Protected local 100 indexed-read median | No failure | **31.39 -> 37.15, fail** (+5.77, >10%) |
+| Protected local 100 UI filter median | No failure | **138.46 -> 156.17, fail** (+17.71, >10%) |
+| All other protected / raw-preview gates | No failures | No other failures |
+
+Two protected medians fail, despite primary improvement in both sessions. Per the unchanged rule, the **single full ui-v2 two-session repeat** is running as **`u2-ui-v2-comparison-repeat`**, native execution **`38069`**, exact same frozen runtime/client bundles and manifest, no concurrent builds/tests or threshold changes. Resume `38069`; a still-regressing/inconclusive candidate must be rejected with focused restoration, retaining independently useful deterministic tests/tooling. U2 is not yet accepted or rejected. U3-U5 remain unstarted.
+
+### U2 accepted after the required complete repeat
+
+Execution **`38069`** completed with exit zero: **28 processes / two seven-pair sessions / 1,344 measurements**, zero unavailable scopes and all exact-result/publication/drain checks passed. Both complete ui-v2 comparisons provide **56 processes / four sessions / 2,688 measurements**. Every raw-preview gate has seven observations per variant/session. No outliers were removed, no ui-v1 evidence was pooled, and no builds/tests ran during timing. The two interrupted ui-v1 repeat attempts remain excluded and preserved.
+
+| Required ui-v2 repeat | Session 1 baseline -> trial, ms | Session 2 baseline -> trial, ms |
+| --- | ---: | ---: |
+| Primary UNC 100 UI search median (min-max) | 338.99 (317.04-369.26) -> 170.43 (151.78-178.96) | 340.08 (336.00-367.06) -> 176.08 (152.89-185.35) |
+| Primary paired median B/A; required <=0.85 | **0.5027, pass** (49.73% improvement) | **0.5178, pass** (48.22% improvement) |
+| UNC 100 dashboard load median | 1,025.46 -> 811.80 | 1,020.10 -> 808.46 |
+| UNC 100 UI filter median | 644.72 -> 459.72 | 661.94 -> 444.39 |
+| Protected local / single-file gates | **All pass** | **All pass** |
+| Raw preview regression gates | **All pass** | **All pass** |
+
+**Decision: accept U2**, retaining runtime trial **`52bfedf`**. The single permitted repeat meets primary improvement in both sessions and all protected bounds, resolving the first comparison's protected-median failures under the prospective rule. Dashboard/search/filter UNC host/share caps are four; global 24/32, local-root two, unknown one, preview priority and single background work remain unchanged. No faster variant, setting or threshold adjustment was introduced. Results describe the small warm/cache-uncontrolled authorized fixtures, not cold/large UNC throughput or a latency guarantee.
+
+All **448/448** repeat owner locks were inactive (both complete ui-v2 comparisons: **896/896**). Reverified all **32** original U0 preserved artifact hashes, the unchanged frozen manifest SHA-256 `E3FA08CBF7CFAA58AE3DAAE765032E088F76E7422B766031F8F908202A9D8868`, and all **eight** ui-v2 runtime/client provenance hashes. All execution handles are terminal and no owned process/window/task/lease remains. Source confirms the accepted four-worker constants and four-path scheduler plan; product versions/public APIs/MCP schemas/default global two remain unchanged. UNC operations stayed read-only in the allowed subtree; no settings/permissions/network/security changes.
+
+Validation for the unchanged accepted runtime remains Core **998/998**, full service-safe UI **1,510/1,510**, required desktop **7/7**, plus the final repeated Core/UI concurrency and expanded native-window cases recorded above, all zero skips. Matching builds passed with existing NU1900 metadata-endpoint warnings. The subsequent edits are documentation only. Updated developer scheduling documentation for the accepted caps. U2 implementation `52bfedf`, ui-v2 tooling `48afbc7`, first ui-v2 outcome `20919dd`; this outcome commit closes U2. Next preserve a fresh MCP baseline from the accepted runtime before U3 edits. Overall goal stays active for U3-U5 and final solution validation.
+
+## U3 trial — shared atomic disk admission
+
+U2 acceptance/documentation is committed at **`129140b`**. Reconciled that clean HEAD before U3 edits; previous turn classification **progress**, with the U2 repeat completed and all preserved hashes/owned-work audits passing. Before runtime edits, awaited fresh Release/win-x64 framework-dependent MCP baseline publish **`59180`** to terminal success, output **`u3-mcp-baseline`**. Published the unchanged measurement/reference client separately as **`u3-mcp-client`** (terminal zero). Baseline Core SHA-256 `C5804F29C48347A1CBE2B823965D214A560C6045BE17EAA6246FE1FF0A597DB7`; Infrastructure `D366F23F249C07F8A67C4ACEDB5A4EB410935FFFBB0E31D928A6BA2CF18788BA`; MCP DLL `DACE01278EC99DC357C2ABAA17271DB3AEDB09A8945C397696DD175B422AF37E`; executable `A8A4AC53D9412B18271634525211B6BDD7D2E4EB87FAC3949E693E1694BCE3C2`. Frozen client DLL `31A1BC9F05AE87F14A8D0528A870A17F79668629C6FEF8F2DC78D3B8B450D64A`; its Core/Infrastructure hashes match the baseline. Local **`u3-baseline-provenance.json`** records all seven hashes. Do not overwrite these bundles.
+
+Implementation replaces the global disk and single-UNC semaphores with one backend-owned **`UncDiskOperationAdmission`**. One lock grants global/host/share capacity atomically, in oldest-eligible order; a blocked host/share waiter owns no global slot. Host/share caps are `min(2, effectiveGlobalLimit)`; default global **two**, explicit one, heavy-request limit and two-file search/count lookahead are unchanged. Share Core's string-only normalized host/share classification through a small internal tuple helper, using the already-existing Infrastructure friend declaration. Preserve literal UNC treatment of malformed/device paths in a fallback group; local/mapped/forward-slash paths retain their existing global-only treatment. No directory/network discovery or public API/schema/setting/version/dependency change.
+
+All three entry points (`ExecuteDiskOperationAsync`, `AcquireDiskOperationAsync`, `ProbePathExistsAsync`) use the coordinator. Idempotent leases own admission and captured query metrics. Detached synchronous probes retain that entire lease plus backend lifetime until actual return, including late faults; caller cancellation only ends the wait. Disposal cancels queued requests, rejects new admission and leaves active leases releasable; inactive group entries are reclaimed after their last waiter/lease reference. No monitor preparation/parallel evaluation or resource-budget change yet.
+
+Seven deterministic coordinator cases cover limits one/two, case/extended aliases, one host across multiple shares, independent hosts/local work, actual blocked-group bypass and oldest eligible order, cancellation of 100 queued hosts, reclamation after 100 historical hosts, malformed inputs and concurrent/idempotent disposal after coordinator shutdown. Two new backend cases hold **both** actual synchronous probes after caller cancellation, assert another request times out without probing/encoding/scanning, retain cache ownership through shutdown and drain successfully on normal or late-fault return. Reworked old delay-based UNC search/probe concurrency assertions around readiness/release gates. Mixed UNC/local query coverage proves the unchanged two-file lookahead and per-query metrics; the coordinator test proves actual busy-group queue bypass. The original blocked-probe deadline case retains strict assertions at explicit global one and now drains in `finally`.
+
+Validation: initial matching build passed, seven coordinator cases **7/7** (`u3-admission-focused`). Existing-focused run **3 passed / 4 failed / 7** (`u3-existing-admission-focused`) exposed intentional former-one-UNC assertions; updated tests to the designed bounds, not relaxed deadlines. A test assertion overload caused a compile/analyzer error during editing; corrected its synchronous exception lambda and rebuilt successfully. Final focused **17/17** (`u3-admission-integration-focused`), then three consecutive final coverage runs **17/17, 17/17, 17/17** (`u3-core-repeat-*`). Affected Core **292/292** (`u3-core-affected`); full Core **1,008/1,008**, zero skips (`u3-core-full`, `39608` terminal). Matching Core builds passed, zero errors/four existing NU1900 metadata-endpoint warnings.
+
+Awaited matching UI build `36282` to terminal success, zero errors/seven existing NU1900 warnings. Affected MCP stdio/help/limits UI **46/46** (`u3-ui-affected`); full service-safe UI **1,510/1,510**, zero skips (`u3-ui-full`, `95932` terminal). This lane explicitly excludes interactive desktop tests. Separate required native desktop **7/7**, zero skips, **`interactive-desktop/336b9fef948e484eaa4a79c2bc1b99a0`**. All tests drain owned work and fake topology paths perform no network access. Git whitespace review passes; new files match CRLF. No owned validation operation is live at this checkpoint.
+
+Next preserve this validated trial in a local commit, publish a **different** `u3-mcp-candidate` artifact and run its required stdio smoke, then measure against `u3-mcp-baseline` with the **same frozen `u3-mcp-client` on both sides**, varying only server executable. Prospectively choose **`unc-2/search-snapshot` complete elapsed time** as U3's concurrent two-file UNC primary workflow (including resolver/probe/protocol/cursor overhead, not a gate bypass). Require the existing paired <=0.85 rule in both sessions and report actual admitted peaks; do not substitute planned limits for measured overlap. Apply unchanged local/single-file protected bounds to each workflow and separately recorded per-fixture monitor release times. Preserve all other workflows, initialization, lifecycle, response size, startup/shutdown and cleanup evidence. Repeat the entire comparison once if required; no performance acceptance yet. U4-U5 remain unstarted.
+
+Final test review retained the mixed UNC/local case's original **two-second** readiness/drain bounds; only its controlled parallel workload changed. Rebuilt Core, then repeated the final coverage **17/17, 17/17, 17/17** (`u3-core-final-repeat-*`), affected **292/292** (`u3-core-final-affected`) and full Core **1,008/1,008** (`u3-core-final-full`, **`84687` terminal**), all zero skips. No production edit followed the earlier UI full/desktop validation; the final stricter test-only edit was validated by these fresh Core runs. No owned operation remains live before the trial commit.
+
+U3 runtime/tests committed at **`6239a67`**, `perf: trial atomic topology-aware MCP disk admission`. Awaited separate win-x64 Release candidate publish **`13352`** to terminal zero before smoke. Required native `Test-McpStdioArtifact.ps1 -ExecutablePath ./artifacts/measurements/unc-performance/u3-mcp-candidate/WeezTail.Mcp.exe` passed with exit zero using isolated local fixtures. Candidate executable SHA-256 `D7654362F1B957F3A189CFF2FFC7A3D170284EA88D85B03D1DC7FAC3EB5BDDE7`; MCP DLL `2E8C0FED59A9ED2712A17AFAD0C1F5ABAA0A65D703FFC1E4C539070178871266`; Core `66980F774D7ED07F6EC94C442DBED0A988C515497567A75374956D7AF089F4A1`; Infrastructure `548188F40387F440A9DC508724EFF8CFD1C8317F82BF30AE5780FE3705735855`. Local `u3-candidate-provenance.json` preserves these; original baseline/client bundles remain untouched. The tree was clean before this documentation checkpoint.
+
+Started the actual comparison, native execution **`53320`**:
+
+```powershell
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Compare -Workflow Mcp -RunId u3-mcp-comparison -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u3-mcp-client -CandidateDirectory ./artifacts/measurements/unc-performance/u3-mcp-client -McpExecutable ./artifacts/measurements/unc-performance/u3-mcp-baseline/WeezTail.Mcp.exe -CandidateMcpExecutable ./artifacts/measurements/unc-performance/u3-mcp-candidate/WeezTail.Mcp.exe
+```
+
+Resume **`53320`**, not a replacement run; both sessions use the exact same frozen client/reference binaries and manifest and vary only server runtime. No builds/tests during timing. Assess complete `unc-2/search-snapshot` paired time and observed concurrency, all protected workflows/release metrics, exact results, wire schemas/limits, lifecycle/cursor behavior and process/lease cleanup. Apply the fixed repeat rule if needed. Current continuation classification **progress**: U2 accepted with measured evidence, U3 implemented/validated/committed and actual stdio measurement running; U3 performance acceptance and U4-U5 remain pending. All other handles are terminal; only this comparison owns ongoing work.
+
+## U3 measured rejection and restoration
+
+Execution **`53320`** completed with exit zero: **28 fresh processes / two seven-pair AB/BA sessions / 2,184 measurements (78 per report)**. All expected exact-result, lifecycle/cursor, structured/text parity, tool-schema and effective-limit checks passed; zero unavailable scopes, stderr characters and active indexed sessions. Retained indexed cache entries stayed within the existing cap and every child exited zero. All **56/56** owner locks were inactive under exclusive-open audit. Reverified all **seven** frozen baseline/client hashes, **four** candidate hashes and unchanged manifest SHA-256. No builds/tests ran during timing, no sample/outlier was removed and no fixture changed. `u3-mcp-comparison/decision-audit.json` retains every workflow/release range, paired ratio, observed peak and process startup/shutdown result.
+
+| U3 complete two-file UNC snapshot workflow | Session 1 | Session 2 |
+| --- | ---: | ---: |
+| Baseline median (min-max), ms | 32.68 (28.00-34.32) | 32.69 (27.68-37.58) |
+| Trial median (min-max), ms | 29.83 (27.20-33.54) | 29.23 (26.47-32.22) |
+| Paired median B/A; required <=0.85 | **0.9204, fail** (7.96% improvement) | **0.9047, fail** (9.53% improvement) |
+| Observed baseline disk / UNC admission peaks | 1 / 1, every pair | 1 / 1, every pair |
+| Observed trial disk / UNC admission peak ranges | 1-2 / 1-2 | 2 / 2, every pair |
+| Protected local/single-file workflow and release gates | All pass | All pass |
+
+The primary fixture is the original ordered **621,817-byte two-file** scope (normalized `unc-000`: 611,029 bytes; `unc-001`: 10,788), exactly **eight** matching lines. It is unevenly sized; no balanced substitute was chosen after seeing results. Full UNC-100 snapshot medians were 854.01 -> 863.40 ms and 880.01 -> 869.08 ms; idle-sweep medians 573.66 -> 568.32 and 568.23 -> 567.01 ms. These other workflows do not replace the prospective primary. Startup medians 737.29 -> 725.94 / 733.78 -> 747.48 ms and shutdown 15.83 -> 15.81 / 16.83 -> 16.66 ms are process diagnostics, separate from the per-fixture protected workflow/release gates. Public metrics demonstrate actual overlap, not merely a raised policy value; sampled memory remains a diagnostic rather than buffer-lifetime proof.
+
+**Decision: reject U3's topology-aware performance candidate.** Both primary sessions consistently fail the 15% requirement and no protected gate is exceeded, so neither disagreement nor protected regression triggers a repeat. Do not run additional variants or substitute a larger/faster workflow. The complete trial, atomic/fairness/cancellation/registry proofs and hashes remain reviewable at **`6239a67`**. Restore preceding runtime behavior: effective global default **two**, shared UNC gate **one**, and existing heavy-request/lookahead/resource limits. Remove only the rejected coordinator, Core topology helper and their feature-specific seven-case fixture. Source comparison confirms backend/policy match accepted U2 commit **`129140b`** exactly; no independent U3 runtime fix is claimed.
+
+Retain useful test improvements against that restored behavior: readiness-gated search/probe admission for explicit global one and default two; queued UNC work does not consume the local query's remaining global slot; bounded `finally` cleanup for the existing blocked-probe deadline case. The two retained normal/late-fault cases now cancel one active and one queued probe, verify a third request cannot probe/encode/scan before the active operation returns, and prove cache/shutdown ownership drains after actual return. Restore single-UNC assertions rather than leaving four/two-worker assumptions in the final tests. These are test-only reliability/ownership improvements; no new default, setting, API/schema or dependency remains.
+
+Restoration validation: matching Core build passed, zero errors/four existing NU1900 warnings. Focused **10/10** (`u3-restored-focused`), three required repeats **10/10, 10/10, 10/10** (`u3-restored-repeat-*`), affected **285/285** (`u3-restored-core-affected`), full Core **1,001/1,001**, zero skips (`u3-restored-core-full`, **`90128` terminal**). Matching UI build **`27548`** passed, zero errors/seven existing NU1900 warnings; affected MCP UI **46/46**, full service-safe UI **1,510/1,510** (`u3-restored-ui-*`, **`1844` terminal**), zero skips. Separate required native desktop **7/7**, zero skips, **`interactive-desktop/6e1aa135f764477fb340e333ca3a49be`**. Awaited fresh Release/win-x64 publish **`u3-mcp-restored-validation`** to exit zero, then its native `Test-McpStdioArtifact.ps1` smoke passed with exit zero. Service-safe UI explicitly excludes desktop coverage. No owned process/window/task/lease remains and whitespace review passes.
+
+**U3 closed — optimization rejected; preceding runtime restored; deterministic test improvements retained.** U2's four-worker UI policy and U1 correctness remain accepted. Next start U4 by preserving a fresh preceding-runtime MCP baseline/client before monitor edits. U4 must use existing global-two/single-UNC admission: two prepared readers do not imply two admitted UNC operations. Review confirms existing scanner-session validation already reopens the current physical path and compares generation, so it can be reused before/after deferred consumption without a new scanner interface. Existing working reservation includes 512 KiB for two scanner buffers in addition to session/line/response scratch; public budgets remain fixed. U4-U5 outcomes and final solution validation are still required; overall goal remains active.
+
+## U4 baseline and implementation checkpoint
+
+U3 outcome/restoration committed at **`c2c0f9e`**, `test: reject MCP admission trial and retain ownership coverage`. Reconciled the clean tree and source equality against accepted U2 runtime before beginning U4. Previous continuation classification **progress**: complete measured U3 rejection, restoration, retained deterministic tests and all required validations/cleanup completed. U4 is now **In progress — baseline preserved**, with no monitor implementation edit yet; U5 remains unstarted.
+
+Before U4 edits, published fresh Release/win-x64 framework-dependent **`u4-mcp-baseline`**, then awaited its completion before publishing frozen reference/measurement **`u4-mcp-client`**. Both completed with exit zero; only existing MCP NU1900 vulnerability-endpoint warnings, no dependency/version changes. Output existence guards prevented overwriting previous bundles. Local `u4-baseline-provenance.json` records seven hashes: baseline Core `C24C8B27AD5AAF36D8BD680366EEC1FC2291E48861982D145F616AB50D7E1035`, Infrastructure `70E77BBC608628EB444BF7E3C61C201098A9B024E9A909FE3D9BDE33CF9D44AE`, MCP DLL `7DF3F16ED0FDC590E3486AA35C1D436014F277B4B0C51C0906A732358C2BE19D`, executable `8BA2E8554AA298EDAA1DE8049C17D3748B052850596C8291E17B041112A2E741`; frozen client DLL `020447A12AF304F90475A47FD43681C3A931AF8EA269C825F3F80C95E8ED1A15`, with matching baseline Core/Infrastructure hashes. Never overwrite these outputs; use this exact client/reference bundle for both sides of the later MCP comparison and vary only server executables.
+
+Next implement the designed request-owned two-slot baseline/poll preparation on workers, capped by effective global one/two, while keeping stable ordered evaluation and aggregate budgets single-owned. Preserve existing **single-UNC admission** after U3 rejection; prove reader/buffer bounds through disposal rather than claiming two admitted UNC operations. Reuse existing `IResumableLogScan.ValidateAfterRead` before consumption and at final validation, including idle readers, and recheck deferred encoding before accepting a prepared result. Private preparation clones must never mutate shared checkpoints/matchers, aggregate budgets or sweep progress; unconsumed work is cancelled/drained/disposed without being marked checked. Preserve per-file deadline across queue/preparation/reduction, existing slice calculation and all public budgets.
+
+Required tests include actual second preparation while the first is gated, reverse completion with stable output, global-one behavior, blocked disposal retaining both slots, tiny/exact aggregate budgets, discarded prepared-but-unchecked slots, delayed generation/encoding changes (including idle), cancellation/replay/authorization, initialization appends and unchanged handoff. Existing initialization tests must signal an actually captured earlier boundary rather than infer it from a later file's startup under parallel preparation. The full-lifetime scanner fake already uses synchronized counters; use explicit readiness for the second lifetime before asserting a two-reader peak. Working reservation is centralized in `McpContinuationLimits.GetWorkingReservationBytes` and charged by `QueryContinuationStore` before transactions; retain its existing 512 KiB scanner component and other scratch allowances. No public limit increase or new scanner interface is presently needed.
+
+All prior execution handles, processes, tasks, windows and leases are terminal/drained. Last accepted-source checks remain Core **1,001/1,001**, full service-safe UI **1,510/1,510**, separate native desktop **7/7**, retained concurrency repeats **10/10** three times and fresh restored artifact smoke, zero skips. Baseline publishes are preparation evidence, not U4 acceptance. The working tree was clean before this documentation-only checkpoint. Continue with U4 source/tests, then matching builds, focused/repeated/full validation, fresh candidate smoke and complete `unc-100/monitor-idle-sweep` measurements under the fixed decision rule. Do not reapply rejected U1/U3 runtime trials, repeat fixture discovery, change thresholds or raise MCP's global/UNC admission limits. U5 still requires its final baseline comparisons. Overall goal remains active for U4-U5.
+
+## U4 implemented trial — validation before timing
+
+The preserved baseline checkpoint is **`1ced065`**. Implemented a request-owned two-slot baseline/poll preparation window, capped by effective global one/two, with synchronous open/encoding work started on workers. Existing global-two/single-UNC admission remains unchanged. Initial baselines merge in stable order only after real disposal. Poll preparations own independent tracker/checkpoint clones and readers; only the ordered reducer evaluates lines and changes aggregate budgets, events, sweep/cursor state and provenance. Revalidate generation/current path and encoding before deferred consumption, validate again after reads including idle, and recheck total time/observation period after awaiting preparation. Existing scanner-session validation provides this without a public interface change.
+
+The unchanged per-file slice starts when its slot is launched and includes queue/preparation/reduction; the same cancellation token reaches open and read. No reset or timeout increase. A consumed per-file timeout ends this poll with the existing explicit error, leaving prepared followers unchecked for the next cursor. A completed-but-expired unconsumed preparation also remains unchecked. This prevents a healthy follower from repeatedly expiring behind the same slow file. `MaxFiles` remains an upper bound; the strict slow/missing/healthy regression now proves two checked/error slots, one unchecked slot, no false idle, replay without I/O, then exactly the healthy event on the next cursor. This internal pagination choice is documented before measuring, not a changed acceptance threshold.
+
+Every pending preparation is cancelled, awaited and observed before response/rollback; expected errors on unconsumed clones do not stop or check those files. Unexpected preparation and close failures remain visible, preserving original plus distinct cleanup errors. Readers become owned immediately after open (before metadata can fail), transfer once, and slots cannot refill until actual disposal finishes. The real-reader lifetime fixture counts from before native open through blocked actual disposal; peak ownership is bounded by one/two even on cancellation and shutdown. This fits the existing 512 KiB scanner reservation (two 256 KiB buffers), with public limits and all other scratch/session/line/response allowances unchanged.
+
+New coverage includes reverse preparation completion/stable reduction, global one/two, synchronous/uninterruptible open, cancellation and backend shutdown retaining cache ownership until drain, delayed generation/encoding changes for idle and active files, blocked discard disposal/replay, metadata failure after actual open, exact line/text/provenance aggregate boundaries, total time and observation-period exhaustion leaving clones unchecked, unexpected preparation/close failure rollback, and the single unreset file deadline. Existing append/handoff/authorization/whole-sweep/UTF-8 contracts remain in the affected suite. Tests use local fixtures and controlled fakes, not additional network targets.
+
+Development failures were corrected at their causes: the original slow-file test exposed prepared-follower starvation (fixed by ending the timed-out batch); append-at-final-validation needed the third validation callback after adding the pre-consumption check. Two generation fixtures attempted overwrite of an open Windows target; changed them to rename the old generation then move the replacement. An affected run had **311/312** because the full-lifetime fake gated whichever parallel worker disposed first, allowing legitimate refill before its strict total-open assertion. Gate the first logical path instead, signal the second actual ownership before peak assertions, and defer response assertions until after unconditional drain so cleanup cannot mask readiness failure. No production bounds, waits or assertions were weakened. The corrected 50-case selection passed three times, affected **312/312**, full Core **1,028/1,028** (`22998` terminal), before explicit shutdown cases were added.
+
+Final Core build passed, zero errors/four existing NU1900 advisory-endpoint warnings. Explicit cancellation/shutdown **4/4** (`u4-shutdown-focused.trx`); final monitor selection repeated **52/52, 52/52, 52/52** (`u4-shutdown-final-repeat-*`), affected **314/314** (`u4-shutdown-core-affected`), full Core **1,030/1,030** (`u4-shutdown-core-full`, **`65686` terminal**), all zero skips. Matching UI build **`73789` terminal zero**, zero errors/seven existing NU1900 warnings. Affected MCP UI **46/46** (`u4-ui-affected`); full service-safe UI currently owned by **`72439`** and must be awaited, not restarted. Separate required desktop lane, fresh candidate artifact smoke, trial commit and actual paired measurement are still pending. No performance acceptance is claimed.
+
+U4 UI full **1,510/1,510**, zero skips (`u4-ui-full`, **`72439` terminal zero**). Separate required native desktop **7/7**, zero skips, **`interactive-desktop/b511152544df470eb4776fd6b7b695e5`**. Both builds and all owned tests have finished; no active process/window/task/lease remains. The service-safe lane explicitly excluded desktop tests. Whitespace review passes. Ready for the local trial commit, separate fresh candidate publish/smoke and actual paired timing; U4 acceptance remains pending.
+
+U4 trial committed at **`3b58dd6`**, `perf: trial bounded monitor preparation with ordered reduction`. Fresh separate Release/win-x64 framework-dependent `u4-mcp-candidate` publish completed with exit zero, followed by required native stdio artifact smoke exit zero. Candidate hashes in `u4-candidate-provenance.json`: Core `0CCFEF4E66B1B178A73D6F3E315ABEBBF6AE0B3EBE6AE1D8AA3BB7A66F26DECF`, Infrastructure `1D053575AC89ECE3AA321C608D5A5B80178C15A3814AC1D49B55682CAD4A01AA`, MCP DLL `E38130E8A6B985F6FBBA4EECB54046AB5B60F91CA6FE97A4D2BD7EB6EEE44CAC`, executable `BA1BD889320AD2A6E55A5BF88C099F7BD3D732225A0EC0AD61D76FE7608709B8`. Reverified seven preserved U4 baseline/client hashes before timing.
+
+Started actual comparison **`6541`**, not yet terminal:
+
+```powershell
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Compare -Workflow Mcp -RunId u4-mcp-comparison -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u4-mcp-client -CandidateDirectory ./artifacts/measurements/unc-performance/u4-mcp-client -McpExecutable ./artifacts/measurements/unc-performance/u4-mcp-baseline/WeezTail.Mcp.exe -CandidateMcpExecutable ./artifacts/measurements/unc-performance/u4-mcp-candidate/WeezTail.Mcp.exe
+```
+
+Resume **6541**, never replace it on a polling timeout. Both sides use the exact same frozen reference/client and manifest and vary only server runtime. Prospectively fixed primary **`unc-100/monitor-idle-sweep`**, complete scope including every poll/cursor/protocol round trip, must meet paired <=0.85 in each session. Apply all local/single-file workflow and separately recorded release gates; startup/shutdown are separate diagnostics. Validate exact results, schemas/limits, lifecycle, buffer proofs and cleanup; public monitor admission metrics remain null and must not be substituted with planned bounds. No builds/tests while timing. All other owned work is terminal. U4 performance acceptance and U5 remain pending.
+
+## U4 first comparison — primary failure, protected repeat trigger
+
+Original comparison **`6541` terminal zero**: **28 fresh processes / two seven-pair sessions / 2,184 measurements**, all 78 scenarios per report. Exact result hashes/counts/evaluated bytes, fixture hashes, structured/text parity, public schema and effective limits agree. Zero unavailable scopes, stderr characters and active indexed sessions; retained indexed sessions within cap and every server exit zero. All **56/56** owner locks inactive under exclusive-open audit. Reverified all **11** U4 baseline/client/candidate provenance entries and original **32** U0 artifact hashes; fixture manifest remains `E3FA08CBF7CFAA58AE3DAAE765032E088F76E7422B766031F8F908202A9D8868`. No builds/tests or fixture changes during timing; no outliers removed.
+
+| U4 complete UNC-100 idle scope sweep, 1,679,152 source bytes | Session 1 | Session 2 |
+| --- | ---: | ---: |
+| Baseline median (min-max), ms | 558.60 (535.67-575.54) | 575.66 (537.20-996.91) |
+| Trial median (min-max), ms | 856.03 (834.97-1,472.76) | 850.29 (804.22-972.87) |
+| Paired median B/A; required <=0.85 | **1.5536, fail** | **1.4585, fail** |
+| Primary exact units | 100 | 100 |
+| Protected workflow gate | All pass | local-100/count fails |
+| Protected release gates | All pass | All pass |
+
+The protected session-two local-100/count median was **68.7009 -> 78.2187 ms**, +9.5178 ms / +13.85%, exceeding both unchanged bounds; its paired ratio was 1.0717. The protected rule uses separate medians and is not replaced by that paired ratio. This single protected regression triggers the one required entire repeat despite consistent primary failure. Public idle-monitor admission counters remain **null**; deterministic gated real-reader tests establish the one/two buffer bound, not a measured two-UNC concurrency claim. `u4-mcp-comparison/decision-audit.json` preserves all workflow/release ranges, response byte ranges, peaks and separate process diagnostics.
+
+Started required unchanged comparison **`87822`**, output **`u4-mcp-comparison-repeat`**, using the exact command above with only `-RunId` changed. Same frozen client, original baseline, trial 3b58dd6 candidate, fixtures and thresholds. Resume this handle rather than replacing it. No builds/tests while timing. Final U4 decision/restoration and U5 remain pending; no performance optimization accepted at this checkpoint.
+
+## U4 required repeat — rejection and focused restoration
+
+Repeat **`87822` terminal zero**: **28 fresh processes / two seven-pair sessions / 2,184 measurements**, all 78 scenarios per report, with all exact units/digests/evaluated bytes, fixture/schema/limit, text/structured parity and lifecycle checks passing. No unavailable scopes, stderr, active indexed leases or nonzero exits. Retained cache within cap. **56/56** repeat owner locks inactive; both complete U4 comparisons **112/112**, all eleven frozen artifact hashes unchanged. No builds/tests during timing, samples removed or fixtures changed. Repeat audit remains in `u4-mcp-comparison-repeat/decision-audit.json` with release, byte-range, peak and process diagnostics.
+
+| U4 repeat complete UNC-100 idle sweep | Session 1 | Session 2 |
+| --- | ---: | ---: |
+| Baseline median (min-max), ms | 541.84 (471.70-566.42) | 558.69 (533.26-602.64) |
+| Trial median (min-max), ms | 810.33 (722.17-845.16) | 830.56 (781.49-852.47) |
+| Paired median B/A; required <=0.85 | **1.5310, fail** (+53.10%) | **1.4732, fail** (+47.32%) |
+| Protected workflow gates | All pass | local-active-100 match/nonmatch fail |
+| Protected release gates | All pass | All pass |
+
+Repeat session-two local active matching median **37.2882 -> 42.3768 ms**, +5.0886 ms / +13.65%; nonmatching **36.4681 -> 42.9998 ms**, +6.5317 ms / +17.91%. Each exceeds both unchanged protected bounds. UNC-100 initialization was **681.39 -> 678.78 / 678.32 -> 692.98 ms**; snapshot search **861.05 -> 847.95 / 836.23 -> 859.72 ms**, neither substitutes for the prospective primary. Separate process startup medians **723.17 -> 718.34 / 716.06 -> 716.85 ms**, shutdown **15.66 -> 16.14 / 15.44 -> 16.36 ms**. Public monitor admission counters remain null; gated tests alone prove complete reader lifetimes.
+
+**Decision: reject U4.** Both complete comparisons consistently fail primary performance, and protected regressions remain in the required repeat. No further candidate variant, altered fixture or extra repeat. Trial source/proofs stay reviewable at **`3b58dd6`**. Restore monitor production source exactly to **`1ced065`**, remove the preparation helper and four feature-only test files. Revert the trial's extra metadata/encoding checks and timeout-pagination changes together; existing sequential monitor contract and all global/UNC/public budgets remain unchanged. Source diff against the preceding monitor is empty. U1 correctness and U2 UI policy remain accepted.
+
+Retain independent test improvements: initialization waits for the actual earlier captured boundary; callback failures dispose the real scanner; lifetime fake gates the configured first logical path rather than whichever worker closes first, explicitly signals second ownership where applicable and asserts response semantics only after unconditional drain. Add four explicit global-one monitor lifetime cases and restore monitor bound **one** for both global one/two. Search/count bound remains two. No U4 runtime optimization/fix is claimed.
+
+Restoration focused **16/16**, first retained repeats **13/13** three times, affected **289/289**. Full Core initially **1,004 passed / 1 failed / 1,005** (`u4-restored-core-full`, **91195 terminal one**): existing `ReleasedSession_ExpiresWithoutAnotherCacheOperation` observed zero cache entries before the timer finished deleting its index outside the lock. Fixed the test's synchronization cause with a `FileSystemWatcher` deletion signal armed while the lease is still held; await actual index deletion under the same five-second bound, then assert zero entries and empty index files. Removed the count-based sleep loop; no runtime change, timeout increase or weaker assertion. Matching build passed (two existing NU1900 warnings). Cache-focused **10/10**; final retained concurrency **14/14, 14/14, 14/14** (`u4-restored-final-repeat-*`). Affected/full Core is currently **7611**; await it before building/testing UI. All real network access remained read-only in the allowed subtree.
+
+User steering: desktop search may be considered for similar bounded preparation, but **discuss before approval**. No such implementation is authorized or included. Current desktop search already runs bounded full-file workers with four UNC host/share slots, local two and global 32. A separate preparation pipeline needs its own evidence and approved design; resuming this U0-U5 goal does not approve that additional feature.
+
+User environment context: the provided share is Windows-to-Linux Samba on a mini PC backed by an HDD enclosure. Production likely has multiple shares/servers and stronger infrastructure. Record this as a representativeness limit, not an independently verified inventory or permission to discover other targets. Current measured U3/U4 rejection follows the fixed package gates on this fixture; it does not prove the approaches cannot help elsewhere. Existing fake topology tests prove bounds/correctness, not multi-server throughput. Added the distinction to the maintained measurement contract.
+
+U4 final restoration validation completed: Core affected **299/299**, full **1,005/1,005**, zero skips (`u4-restored-final-core-*`, **`7611` terminal zero**), after matching build and **14/14** concurrency repetitions three times. UI matching build **`73234` terminal zero** (zero errors/five existing NU1900 advisory-endpoint warnings), affected **46/46**, full service-safe **1,510/1,510**, zero skips (`u4-restored-ui-*`, **`81340` terminal zero**). Separate required native desktop **7/7**, zero skips, **`interactive-desktop/921084bd72ad4636a21229046f2b3971`**. Fresh separate `u4-mcp-restored-validation` publish and its native stdio smoke both exited zero. Source comparison of Core/Infrastructure/App against **`1ced065`** is empty; public contracts, versions, budgets and existing admission are unchanged. Only independent test improvements and outcome documentation remain relative to pre-U4.
+
+**U4 closed — performance optimization rejected after the required repeat; preceding runtime restored and validated.** All owned processes/windows/tasks/leases are drained; no measurement or validation handle remains active. No push/tag/version/release/history change. Ready for the required local restoration commit and U5 integrated validation/measurement. The goal remains active; U5 is not yet complete.
+
+## U5 integrated validation checkpoint
+
+Reconciled clean HEAD **`7f2c63b`** after U4 closed. Previous goal turn was **progress**: completed required repeat, audited measured rejection/cleanup, restored only U4 runtime/features, corrected independently observed test synchronization and committed passing restoration. Desktop-search preparation remains an unapproved design discussion. Single Samba/mini-PC/HDD fixture limitations remain explicit; fake topology proofs do not claim real multi-server performance.
+
+Final `dotnet build LogReader/LogReader.sln -c Release -m:1 -p:UseSharedCompilation=false` completed **`25040` terminal zero**, zero errors/seven existing NU1900 advisory-endpoint warnings. The matched native retained-concurrency selections derive from prior final phase TRX method names and current classes: Core **39/39, 39/39, 39/39**, UI **25/25, 25/25, 25/25**, zero skips (`u5-retained-{core,ui}-repeat-*`). Core includes original whole-budget/lifetime, U1 generation/ownership, U2 topology/search, retained U3 detached/admission, U4 explicit-one lifetime/readiness and cache-deletion synchronization. UI includes U0/U1 ownership/generation and U2 scheduler/foreground/global/background/plain-reader cases. Selection files are retained locally. Native desktop/measurement seeding cases are separate and will also repeat three times. Full service-safe solution tests currently owned by **`83020`**; await before desktop/build/publish. Service-safe explicitly excludes `Category=InteractiveDesktop`.
+
+Prospective U5 comparisons: preserve fresh final component client/runtime, actual UI and MCP server artifacts from this source; baseline clones must retain exact original **415248a** runtime DLL hashes from the immutable U0 inventory. Use the same measurement recipe/client on both sides, varying runtime binaries only. MCP uses identical reference client and original U0 server vs final server. UI uses ui-v2 canonical single-save setup on both sides; original runtime stays unchanged. Compare components too, alongside actual dashboard load/first-content/raw-preview/search/filter/viewport/shutdown and all 78 MCP snapshot/count/read/init/idle/local-active/lifecycle cases. Both sequential seven-pair AB/BA sessions, fresh processes, unchanged manifest, all samples retained, no builds/tests during timing. The accepted UI search primary remains unc-100/ui-search with <=0.85 both sessions; MCP/component controls document integrated behavior rather than inventing a new MCP speedup requirement after rejecting U3/U4. Apply the existing protected workflow/preview/release bounds and repeat rule to any integrated regression. Required evidence, final outcome table/audit and cleanup remain pending.
+
+U5 final solution service-safe **`83020` terminal zero**: UI **1,510/1,510**, Core **1,005/1,005**, zero skips. Combined **2,515** executed; desktop tests explicitly excluded. Separate required native desktop repeated **7/7, 7/7, 7/7**, zero skips, **`98703` terminal zero**; run directories `5b9a60c043a64a80b90c40db9999dcd9`, `aa4b6da1bf634db8af9b40b929f6243c`, `7605f72daad54fb7a730f8f3f00d05de`. This repeats both one-file and 100-file actual dashboard/canonical setup cases as well as the remaining required native tests. No relevant source/test edit followed this validation.
+
+Awaited fresh final Release publishes from **`7f2c63b`**: separate win-x64 framework-dependent **`u5-mcp-final`**, **`u5-components-final`** and **`u5-ui-final`**, all exit zero. Fresh final MCP native stdio smoke passed exit zero. Core/Infrastructure DLL hashes are shared across these final bundles: Core `60A28BA8C20D5EC41972266580C6551B0736AC8EAB8787DF361F6CA3D6F7301B`, Infrastructure `BA734CB37B89E20BCEB6FD48F975EC991844009A9565EB27DF5726C62543F5E0`; UI App `E54761DA0F3A077BD637CFEB78313DE568D5776AF44A68A39FF8F00D47EA00B8`, UI client `BF93D09A17B15F38365B8C947EA36432774F3A50184D45B8B1D2029C6586A0DC`; component/MCP client `5193B43299529B62D3AB469F8E919F036108DE54363ABA814DE84F8A61D56459`; final MCP DLL `5BA6CCB7671CB05B6C4300A2EAC45A0410190574F4700D6C927DB425AC138D23`, executable `0CDE1511F9E35E512A30455E4AE9F439BAA180D2A83F78D3AD1B45387C56A30B`.
+
+Original **32/32** U0 inventory hashes reverified before preparing new local comparison clones. **`u5-components-u0`** copies the final component/client output and substitutes only exact original `415248a` Core/Infrastructure DLL/PDB files; **`u5-ui-u0`** copies the final ui-v2 output and substitutes exact original App/Core/Infrastructure DLL/PDB files. Thus paired measurement/client/dependency recipes match while original runtime binary hashes remain exact. No original bundle was overwritten. MCP uses original `u0-415248a-native/baseline-mcp/WeezTail.Mcp.exe` and separate final server, with the identical `u5-components-final` reference/client on both sides. Local **`u5-provenance.json`** records **22** entries and runtime source identities. Baseline client recipes were upgraded only in new clones, not original evidence. Public dependencies/version are unchanged.
+
+Started U5 component comparison **`10264`**, output `u5-components-comparison`:
+
+```powershell
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Compare -Workflow Components -RunId u5-components-comparison -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u5-components-u0 -CandidateDirectory ./artifacts/measurements/unc-performance/u5-components-final
+```
+
+Resume **10264**, no replacement on observation timeout. No builds/tests during timing. Afterwards run actual UI using `u5-ui-u0` / `u5-ui-final`, then MCP using identical `u5-components-final` clients and original/final executables above. Do not run workflows concurrently. Require full paired evidence, exact results, protected/release/preview gates and one fixed repeat if triggered. All final candidate source remains frozen at **7f2c63b**; subsequent edits are documentation only. U5 performance audit/outcome table and final cleanup/commit remain required.
+
+## U5 component outcome and actual UI comparison
+
+Component **`10264` terminal zero**: **28 fresh processes / 1,344 measurements / 48 scenarios per report**, all exact units/digests/source bytes agree, zero unavailable scopes. Original U0 runtime DLL hashes are present in baseline reports and matching current client hashes in both sides. `u5-components-comparison/decision-audit.json` retains every protected/local/single-file timing range and harness-observed peaks. All protected gates pass; no repeat trigger. All **28/28** component owner locks inactive under exclusive-open audit. Component cleanup awaits all work and disposes every index/build/scanner before reporting. These are isolated component costs, not WPF/protocol latency; component `viewport-100` includes index creation and is distinct from UI's isolated indexed read.
+
+| Final isolated UNC-100 search-policy (205 exact hits, 1,679,152 source bytes) | Session 1 | Session 2 |
+| --- | ---: | ---: |
+| U0 median (min-max), ms | 346.65 (325.84-351.23) | 349.64 (306.08-370.22) |
+| Final median (min-max), ms | 158.30 (154.03-177.74) | 157.67 (145.59-164.23) |
+| Paired B/A | **0.4670** | **0.4556** |
+
+Started actual WPF comparison **`62324`**, output **`u5-ui-comparison`**:
+
+```powershell
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Compare -Workflow Ui -RunId u5-ui-comparison -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u5-ui-u0 -CandidateDirectory ./artifacts/measurements/unc-performance/u5-ui-final
+```
+
+Resume **62324**, do not replace it. Same ui-v2 client/canonical setup on both sides, exact original U0 vs final runtime DLLs, same manifest and warm/cache-uncontrolled protocol. All other work terminal; no builds/tests during timing. Primary unc-100/ui-search, protected local/single-file, raw-preview publication and cleanup gates remain required. MCP comparison and final integrated audit/outcome summary still pending.
+
+## U5 first actual UI outcome — protected repeat trigger
+
+Actual UI comparison **`62324` terminal zero**: **28 fresh native processes / 1,344 measurements / 48 scenarios per report**, all exact results agree, zero unavailable scopes and all owned work drained. All **448/448** owner locks inactive under exclusive-open audit. Reports prove exact original U0 App/Infrastructure hashes on A, final hashes on B, and identical ui-v2 client hashes. Planned UNC-100 search concurrency is two vs four, explicitly a policy limit rather than measured admission. Raw samples and all workflow/preview observations remain in `u5-ui-comparison/decision-audit.json`; nothing removed.
+
+| U5 actual UNC-100 UI search, 205 exact hits | Session 1 | Session 2 |
+| --- | ---: | ---: |
+| U0 median (min-max), ms | 354.36 (333.40-380.51) | 352.80 (334.06-365.96) |
+| Final median (min-max), ms | 165.61 (159.73-175.83) | 169.93 (163.39-188.48) |
+| Paired B/A; required <=0.85 | **0.4662, pass** | **0.4924, pass** |
+| Protected workflows | Three local failures | All pass |
+| Raw-preview gates | All pass | All pass |
+
+Protected session-one failures: local-1 first-content median **3.7949 -> 10.9775 ms** (+7.1826 ms); local-100 indexed read **29.3750 -> 34.7662 ms** (+5.3912 ms); local-100 filter **129.9619 -> 169.7591 ms** (+39.7972 ms). Each exceeds both 10% and 5 ms in separate medians; paired ratios (1.0775 / 0.9725 / 1.1860 respectively) do not replace that protected rule. First-content publication kind and raw preview are separately preserved; no raw-preview failure exceeded both 10% and 16 ms. This triggers exactly one entire unchanged repeat; no tuning, source edits, fixture changes, outlier exclusion or increased timeouts.
+
+Started required unchanged actual UI repeat **`84387`**, output **`u5-ui-comparison-repeat`**, exact prior UI command with only RunId changed. Same `u5-ui-u0`/`u5-ui-final` artifacts and original fixture manifest. Resume **84387**, never restart on observation timeout. All other work terminal, no builds/tests during timing. Final actual MCP comparison remains pending; U5 acceptance is incomplete until repeat/remaining measurements and final audit/summary/cleanup pass. Draft `Results.md` is owned uncommitted documentation and explicitly marks pending final evidence.
+
+## U5 actual UI repeat passed; final MCP comparison running
+
+Reconciled HEAD **`df7f35a`** and the owned untracked `Results.md` draft after explicit user pause/resume. Previous goal turn was **progress** (completed integrated evidence and committed first UI trigger/active repeat; corrected audit classification), then explicitly paused. Resume polled the exact **`84387`** handle: **terminal zero**, never restarted. No runtime/test source changed during either UI comparison or the pause.
+
+Audit correction: the first UI calculation initially applied the general protected **5 ms** floor to `preview-or-index-publication` despite the plan's explicit **16 ms UI publication** floor. Corrected that metric's classification while retaining the original 10%/5 ms/16 ms thresholds and every raw sample. Both sides' local-one first-content observations were all previews. Thus the initial +7.1826 ms publication difference is within its specified 16 ms floor; the initial local-100 indexed-read (+5.3912 ms) and filter (+39.7972 ms) failures independently still trigger exactly the same required repeat. No new timing, sample deletion or source change was used for this correction. Local `decision-audit.json` now records each metric's floor. The first-comparison table above records the initial audit history; its corrected protected failure count is **two**, not three. Raw preview itself always used 16 ms and passed.
+
+Required actual UI repeat **`84387` terminal zero**: **28 fresh native processes / 1,344 measurements**, all 48 scenarios per report, exact units/digests/source bytes agree, zero unavailable scopes and owned work drained. All protected workflow/publication and raw-preview gates pass in both sessions. Even applying the stricter general 5 ms floor to the repeat's publication rows would produce **zero** failures; the classification correction does not decide final repeat acceptance. All **448/448** repeat owner locks inactive, both UI comparisons **896/896**. Reverified all **22** U5 artifact provenance entries unchanged.
+
+| U5 repeat actual UNC-100 UI search (205 hits / 1,679,152 source bytes) | Session 1 | Session 2 |
+| --- | ---: | ---: |
+| U0 median (min-max), ms | 352.59 (330.20-699.03) | 339.01 (328.74-360.75) |
+| Final median (min-max), ms | 171.94 (159.61-185.80) | 171.78 (164.94-179.69) |
+| Paired B/A; required <=0.85 | **0.4834, pass** (51.66% improvement) | **0.5135, pass** (48.65% improvement) |
+| Protected workflow/publication gates | All pass | All pass |
+| Raw-preview gates | All pass | All pass |
+
+**Integrated UI acceptance passes after the required repeat.** All raw observations/outliers, first-content kinds, raw-preview counts/ranges, planned limits and sampled working sets remain in `u5-ui-comparison-repeat/decision-audit.json`. A baseline 699.03 ms search sample is retained. Planned UNC search is two vs four, not an observed native-admission count. No synthetic topology result substitutes for real multi-server throughput.
+
+Started final actual stdio comparison **`84296`**, output **`u5-mcp-comparison`**:
+
+```powershell
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Compare -Workflow Mcp -RunId u5-mcp-comparison -FixtureId u0-415248a-native -BaselineDirectory ./artifacts/measurements/unc-performance/u5-components-final -CandidateDirectory ./artifacts/measurements/unc-performance/u5-components-final -McpExecutable ./artifacts/measurements/unc-performance/u0-415248a-native/baseline-mcp/WeezTail.Mcp.exe -CandidateMcpExecutable ./artifacts/measurements/unc-performance/u5-mcp-final/WeezTail.Mcp.exe
+```
+
+Resume **84296**, do not restart on observation timeout. Identical frozen reference/client, exact original U0 server vs final runtime, unchanged manifest, same 78 snapshot/count/read/init/idle/local-active/lifecycle scenarios. No builds/tests or other timing workflows concurrently. Apply prospective protected local/single-file workflow and release controls (no invented new MCP 15% optimization gate after U3/U4 rejection); process startup/shutdown separate diagnostics. All prior handles terminal. Final MCP outcome, Results.md tables, all-requirement audit, cleanup and coherent local commits remain required; overall goal active/incomplete.
+
+## U5 final MCP outcome and completion audit
+
+Final MCP **`84296` terminal zero**: **28 fresh sampler/server pairs / 2,184 measurements / 78 scenarios per report**, all exact units/digests/evaluated bytes, fixture hashes, structured/text parity, lifecycle/cursor/replay, schema and effective-limit checks pass. Zero unavailable scopes, stderr, active indexed sessions or nonzero exits; four retained indexed sessions per process remain within the unchanged cap. Every protected local/single-file workflow and separately recorded monitor release gate passes; no repeat trigger. `u5-mcp-comparison/decision-audit.json` records all ranges/bytes/peaks and separate process diagnostics. No new MCP speedup requirement or claim is introduced after U3/U4 rejection.
+
+| Final actual UNC-100 stdio workflow, median ms U0 -> final | Session 1 | Session 2 | Exact units |
+| --- | ---: | ---: | ---: |
+| Snapshot search | 860.74 -> 857.95 | 852.06 -> 846.06 | 205 |
+| Exact count | 593.10 -> 709.25 | 571.28 -> 574.59 | 205 |
+| 100-line reads | 1,127.29 -> 1,071.64 | 1,030.92 -> 1,059.73 | 10,000 |
+| Monitor initialization | 676.51 -> 679.89 | 664.11 -> 675.01 | 100 |
+| Complete idle scope sweep | 555.60 -> 571.49 | 541.53 -> 536.14 | 100 |
+
+Full min/max ranges are tracked in **Results.md**. Idle paired B/A **1.0035 / 1.0238**; count paired B/A **0.9788 / 0.9659**, which differs from separate medians in the first session. Preserve both statistics; no consistent MCP improvement/regression or tail guarantee is inferred. These multi-file UNC secondary workflows do not replace the prospectively selected primary or protected local/single-file gates. Local active-100 matching/nonmatching medians **39.59 -> 39.71 / 38.29 -> 36.61 ms** and **38.67 -> 41.70 / 37.26 -> 37.41 ms**, with exactly **100 / zero** events, all gates pass. Separate process startup **753.93 -> 730.46 / 693.39 -> 714.61 ms**, shutdown **16.36 -> 15.80 / 15.77 -> 16.33 ms**; baseline 408.27 ms shutdown outlier retained.
+
+Final available query admission peaks are disk **1-2**, UNC **0-1**, confirming unchanged global-two/shared-UNC-one bounds. Read/monitor counters remain null; deterministic native-reader lifetime tests remain the proof for those operations. All final MCP schema hashes are **`704E9C03DE2134E494F88BEC3BB005B51C07D049EEFBBFD29A33799C030B5202`**. Complete workflow wire totals span **2,620-2,376,398 bytes** across all fixtures; per-response public limits remain unchanged. UNC-100 snapshot/count/read wire totals are fixed **128,528 / 64,202 / 2,376,398 bytes**, initialization **61,624-61,646**, idle **85,247-85,313**. Workflow totals include multiple pages/calls, not a per-envelope budget.
+
+Completion audit inspected actual current state rather than prior counts: rehashed original **32/32** inventory, final **22/22** provenance and unchanged fixture manifest; validated every reported runtime hash in **112 reports / 6,216 measurements** (component 1,344; UI original+required repeat 2,688; MCP 2,184). Inspected actual XML counters for final solution Core **1,005**, UI **1,510**, retained concurrency **39 / 25** three times and actual desktop **7** three times, all passed/zero skips; matching build and fresh final MCP smoke passed. Source comparison proves exactly four production files differ from U0 and no runtime/test edit followed final validation. Production project files, version props/global.json and all MCP monitor production source remain unchanged as documented. Local `u5-completion-evidence.json` records these independent assertions.
+
+Final ownership audit **`70304` terminal zero** traversed only local measurement artifacts, skipping reparse entries (none encountered), and exclusively opened all **4,456/4,456** historical owner locks. No measurement executables remain; a separate native process check found **zero test runners**. All measurement/test/build/publish/smoke handles are terminal; owned windows/tasks/leases drained. No original bundle overwritten, remote mutation, additional target/discovery, security/SMB setting, dependency/version change, push/tag/release/installation, branch switch or history rewrite. All unrelated work preserved. Private manifests/log data remain local ignored artifacts.
+
+**U5 complete.** All prior phase decisions, full measured original/repeat evidence, final regression/desktop/protocol checks, source/resource/provenance/security/cleanup review and concise tracked **Results.md** are complete. Developer guide now documents accepted four-worker policy plus interactive ownership/continuity; rejected runtime is absent. Single Samba/mini-PC/HDD and missing representative large/multi-server UNC coverage remain disclosed limitations, not invented passes. Desktop-search preparation and all deferred work remain outside approval. Final delivery is the coherent local outcome/documentation commit containing this section and Results.md; repository whitespace/link/status review completes the delivery. No required acceptance check remains open.

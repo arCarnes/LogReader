@@ -117,16 +117,27 @@ public sealed class IndexedLogSessionCacheTests : IAsyncLifetime
     {
         var path = await CreateFileAsync("automatic-expiry.log", "one\ntwo");
         using var cache = CreateCache(warmRetention: TimeSpan.FromMilliseconds(50));
-        using (var lease = cache.Acquire(path))
+        using var lease = cache.Acquire(path);
+        await lease.UseCurrentIndexAsync(
+            static (index, _, _) => Task.FromResult(index.LineCount));
+        var indexPath = Assert.Single(GetIndexFiles());
+        var deleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var watcher = new FileSystemWatcher(Path.GetDirectoryName(indexPath)!)
         {
-            await lease.UseCurrentIndexAsync(
-                static (index, _, _) => Task.FromResult(index.LineCount));
-            Assert.Single(GetIndexFiles());
-        }
+            Filter = Path.GetFileName(indexPath),
+            NotifyFilter = NotifyFilters.FileName
+        };
+        watcher.Deleted += (_, args) =>
+        {
+            if (StringComparer.OrdinalIgnoreCase.Equals(args.FullPath, indexPath)) deleted.TrySetResult();
+        };
+        watcher.Error += (_, args) => deleted.TrySetException(args.GetException());
+        watcher.EnableRaisingEvents = true;
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (cache.GetSnapshot().RetainedSessions != 0 && DateTime.UtcNow < deadline)
-            await Task.Delay(20);
+        lease.Dispose();
+        // Expiration removes the cache entry before disposing its mapping outside the lock.
+        // Observe actual deletion rather than treating the entry count as a cleanup barrier.
+        await deleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(0, cache.GetSnapshot().RetainedSessions);
         Assert.Empty(GetIndexFiles());

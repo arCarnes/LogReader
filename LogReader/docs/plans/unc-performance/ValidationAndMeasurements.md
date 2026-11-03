@@ -1,6 +1,8 @@
 # UNC validation and measurements
 
-Status: Historical investigation plus required future acceptance protocol. No runtime phase of this package has been executed. Read the [design](Design.md) and [execution plan](ExecutionPlan.md) together with this document.
+Status: U0 complete; U1 assessed with its performance optimization rejected and correctness fixes validated; U2 accepted after its required ui-v2 repeat; U3 admission trial rejected on consistent primary-gate failure, preceding runtime restored and validated; U4 preparation trial rejected after the required repeat; preceding runtime restored and validated; U5 complete. Historical investigation remains separate from execution evidence. Read the [design](Design.md) and [execution plan](ExecutionPlan.md) together with this document.
+
+Final outcome and requirement audit: [Results.md](Results.md).
 
 ## Historical evaluation
 
@@ -47,6 +49,50 @@ Supplementary local evidence originally lived under repository-root `artifacts/u
 
 These small warm-cache runs cannot establish cold throughput, p95 latency, behavior on every share, or a hard cancellation deadline. Buffered line seeks do not imply one network request per line. API call counts are not SMB packet counts. For earlier full MCP surface evidence, see [MCP consistency measurements](../../McpToolConsistencyMeasurements.md); do not combine their single-run timings with these component samples.
 
+## Maintained measurement tooling (U0)
+
+The opt-in driver is [Measure-UncPerformance.ps1](../../../packaging/scripts/Measure-UncPerformance.ps1), backed by a separate console project under existing Core test infrastructure. Its assembly uses the existing `LogReader.Core.Tests` friend identity, without extending runtime APIs or joining ordinary test discovery. The shared fixture-safety code is exercised by `UncPerformanceFixtureTests`.
+
+From the repository root:
+
+```powershell
+# Use fresh IDs. Prepare builds/preserves its own Release component bundle before reading fixtures.
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Prepare -RunId baseline-fixtures -IncludeUnc
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Baseline -RunId baseline-components -FixtureId baseline-fixtures -BaselineDirectory ./artifacts/measurements/unc-performance/baseline-fixtures/baseline-components
+# Publish a later harness build to a separate LOCAL output; do not overwrite the baseline bundle.
+dotnet publish LogReader/LogReader.Core.Tests/UncPerformanceHarness/UncPerformanceHarness.csproj -c Release -m:1 -p:UseSharedCompilation=false -o artifacts/measurements/unc-performance/candidate-components
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Compare -RunId component-comparison -FixtureId baseline-fixtures -BaselineDirectory ./artifacts/measurements/unc-performance/baseline-fixtures/baseline-components -CandidateDirectory ./artifacts/measurements/unc-performance/candidate-components
+```
+
+Outputs stay under repository-root `artifacts/measurements/unc-performance/`. `manifest.private.json` contains physical paths and identity evidence and must remain local/ignored. Normalized reports contain hashes and fixture labels, not physical paths or log content. Prepare generates 100 numbered files (250 UTF-8 lines and one match each), 128 MiB and 9 MiB ASCII files, and nine short encoding/fragment/newline fixtures. It rejects existing fixture directories and reparse-point output ancestors. UNC discovery inspects only the authorized root and descendants, skips reparse entries, limits depth to three and files to 130, and uses a cooperative 30-second discovery budget. Sample runs revalidate descendant components, size/write/identity and full content hashes before/after each scenario. A scope exceeding 256 MiB or lacking full evidence is reported unavailable. No UNC writes or local mirrors are made.
+
+Baseline runs two sequential seven-sample sessions. Compare runs two seven-pair sessions alternating AB/BA, with a fresh process and untimed API warmup per sample. It rejects mismatched exact result digests/counts, fixture hashes, missing scenarios and zero samples. Raw reports remain available if a later comparison fails. The driver records per-session medians, minima/maxima and paired ratios; no outliers are removed. Keep builds and tests idle while collecting timed sessions.
+
+Component coverage is indexing, explicit initial-suspend interactive builds, production policy-driven search/filter, index-plus-100-line viewport reads, and EOF scanner open/encoding/validation at a caller bound of two. `viewport-100` **includes index creation**; it is not an isolated indexed seek. Component work peaks and scanner buffer bounds are observed for the harness batch; search/filter operation peaks are explicitly uninstrumented (`null`). These are not backend admission metrics.
+
+The driver also supports `-Workflow Mcp` with `-McpExecutable <preserved-local-exe>` (and `-CandidateMcpExecutable <candidate-local-exe>` for Compare). Use identical newly built measurement bundles for both variants; a hash guard rejects mismatched clients/reference assemblies before launch. The server executables supply baseline/candidate runtime behavior. Each sample copies the server bundle into an isolated local deployment, writes its private local catalog, observes initialize readiness, then times actual stdio snapshot/search, count, 100-line reads per selected file, monitor initialization and full idle sweeps at 1/2/10/100-file scopes. The additional two-file scope measures real admission for U3. Local 128 MiB and 9 MiB workflows are included. It compares snapshots/counts/reads to independent Core file-reader references and checks complete traversal, BOM-aware full evaluated-byte totals, every checked slot, truthful idle/backlog fields, identical replay envelopes, monitor release and clean process shutdown. Both text and structured response bodies must agree. Reports retain wire bytes, observed working set/private bytes and forward-poll progress. Admission peaks come from existing snapshot/count statistics; absent read/monitor admission metrics are `null`, not inferred from memory. Compare also rejects schema/effective-limit changes. Older pre-audit reports lack observed scan-byte fields and must not be mixed with newer candidate timing as an acceptance comparison.
+
+MCP samples generate separate owned local `old\n` files and append `other\n` or a numbered `needle` line for complete 1/10/100-file active sweeps. Writes and initial baselines are outside poll timing; original frozen fixtures remain untouched. Event kind, byte offset, text and generation presence are checked. Physical generation IDs vary across independent deployments, so cross-process hashes normalize identities to file/offset/kind/content.
+
+The final lifecycle recipe adds 22 real stdio scenarios: every interior split of é/€/😀 with and without a UTF-8 BOM; a UTF-16 half-unit; ANSI; unfinished regex removal/rematch; split CRLF; replacement, truncation and encoding change alongside healthy-file progress; missing/reappearance of the same generation; and search/count frozen-boundary handoff with an incomplete character arriving before monitor creation. Every cursor poll validates exact ordered events, offsets, unchanged generation, checked/unchecked/backlog/idle/stopped fields, response parity and identical replay. Expected per-file errors must match their exact code/state and partial flag; they are explicit correctness scenarios, never complete successful throughput samples. Handoff creation starts an independent observation and is not a cursor replay. Timings sum forward poll response durations, excluding mutation, initial baselines, replay validation and release; release has its own field. Frozen source fixtures are never mutated. The actual dashboard and native-window evidence is documented below and in the execution checkpoint.
+
+Resource observations distinguish protocol counters from deterministic ownership proofs. `ScannerLifetime_IncludesBlockedDisposalAndDrainsBeforeResponse` counts ownership before real scanner open through completion of real disposal, including a readiness-gated uninterruptible disposal. Search/count remain at two scanner lifetimes and the sequential baseline monitor at one; cancelled responses cannot finish while disposal retains its buffer. Each real scanner rents one 256 KiB buffer, so the request fits the unchanged 512 KiB scanner reservation. `Monitor_TotalBudgetRetainsUnconsumedSlotAndOrderedSweepProgress` exhausts exactly 4 MiB across 16 files, leaves the seventeenth slot unchecked and resumes there without skipping it; replay returns the committed response. Existing admission/detached-probe, continuation-memory and lifecycle tests remain authoritative for their corresponding bounds. Absent public monitor/read admission counters are reported as null; sampled process memory and UI planned policy limits are not substituted for them. U3/U4 must extend these proofs for their changed scheduling.
+
+The UI driver uses `-Workflow Ui` and bundles built from `LogReader/LogReader.Tests/UncPerformanceHarness/UncUiPerformanceHarness.csproj` (executable `LogReader.Tests.exe`). It links the existing `WpfTestHost` and requires an available native input desktop. All view-model setup, observation, assertions and cleanup execute on that host. Samples use the real dashboard activation/scheduler/FileSession/readers, native `LogViewportView`, and search/filter panel commands. Each scope warms once, then measures dashboard completion, first preview-or-index publication, isolated indexed 100-line reads, UI disk search, filter and shutdown. Both ordinary preview latency and publication kind are retained; a fast indexed publication is not reported as a preview. Results verify every index offset, preview offset/text/truncation, hit identity/text, filter line identity, indexed read and scrolled viewport content. The required `UncPerformanceDesktopTests` smoke covers one-file and 100-file local load/search/filter/scroll/close and fails rather than skips on unavailable desktop access.
+
+Recipe `ui-v2` seeds the identical stable-ID versioned log-file envelope in one untimed local write, then validates every ID/name/path through the real repository before VM construction. This replaces `ui-v1`'s repeated whole-store rewrite for each entry; measured operations, source fixtures, exact-result checks and thresholds are unchanged. Both variants must use matching recipes. Preserve older evidence separately and do not pool recipes for acceptance. Stage diagnostics reset at the start of each warm/measured scope; bounded failure traces contain at most 24 method names, without exception messages or physical paths. No persistence error is caught or retried to obtain a timing result.
+
+UI tail polling is a synchronized registration-only double, with zero registrations required after shutdown. This isolates loading from background polling; it does not measure production tail polling. Loading uses default auto-scroll, then manual scroll validation disables it. Each warm/measured scope has separate local repositories/cache state, and drains all owned view-model work before host reuse. Policy limits are reported as planned concurrency, not inferred admission peaks; working set is a sample rather than buffer-lifetime evidence. The UI candidate bundles may differ in application/runtime assemblies, but must retain the same measurement recipe and frozen manifest. Prepare fixtures first using the Components workflow; UI/MCP Prepare is rejected before writing artifacts.
+
+```powershell
+dotnet publish LogReader/LogReader.Tests/UncPerformanceHarness/UncUiPerformanceHarness.csproj -c Release -m:1 -p:UseSharedCompilation=false -o artifacts/measurements/unc-performance/ui-baseline-bundle
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Baseline -Workflow Ui -RunId ui-baseline -FixtureId baseline-fixtures -BaselineDirectory ./artifacts/measurements/unc-performance/ui-baseline-bundle
+# Build the same harness source with candidate runtime code into a DIFFERENT local output before Compare.
+./LogReader/packaging/scripts/Measure-UncPerformance.ps1 -Mode Compare -Workflow Ui -RunId ui-comparison -FixtureId baseline-fixtures -BaselineDirectory ./artifacts/measurements/unc-performance/ui-baseline-bundle -CandidateDirectory ./artifacts/measurements/unc-performance/ui-candidate-bundle
+```
+
+The sandbox's VSTest host could not connect and its UNC read failed. Native authorized Windows execution succeeded without changing timeout or network settings. Record the execution context in subsequent evidence; a sandbox startup abort does not count as a test pass.
+
 ## Fixture and benchmark protocol
 
 U0 must implement this protocol in maintained, opt-in tooling before runtime changes. Do not execute new measurements while creating the planning package.
@@ -63,17 +109,24 @@ U0 must implement this protocol in maintained, opt-in tooling before runtime cha
 
 The local 128 MiB and lifecycle fixtures are mandatory. Large-file real UNC throughput is explicitly outside this read-only fixture coverage when no suitable authorized file exists; say so. Do not synthesize large remote files to close that gap. An inaccessible allowed root leaves required real UNC acceptance open; do not broaden discovery.
 
+## Environment representativeness
+
+The user describes the authorized fixture as a Windows client accessing Samba on Linux, hosted on a mini PC backed by an HDD enclosure. This topology is user-provided context, not an independently measured hardware/network inventory. The real fixture covers one UNC host/share and one storage path. Production may span multiple shares and servers with stronger CPU, network and storage infrastructure; those differences can change the useful concurrency and dominant costs. Warm/cache-uncontrolled timings here support the package's fixed accept/reject decisions for this fixture, not a universal choice for all SMB deployments. Controlled multi-host/share tests establish correctness, normalization, isolation and resource bounds only; they do not establish real multi-server throughput. Additional production measurements require separately authorized representative targets; never discover or benchmark outside the currently allowed subtree.
+
 ## Candidate decision rule
 
 These are prospective engineering acceptance thresholds, not claims about the historical data. Compare each candidate against the preceding accepted phase, and final delivery against U0.
 
 - Correctness, contract compatibility, aggregate limits and complete owned-work cleanup are hard requirements. A failure cannot be traded for speed.
-- Retain a performance candidate only if its primary UNC workflow's paired median elapsed time improves by at least 15% in each of the two seven-pair sessions. U1 primary workflow: 100-file interactive loading; U2: 100-file UI disk search; U3: concurrent admitted two-file UNC disk work; U4: complete 100-file idle monitor sweep. Record initialization and all other workflows too. Use complete workflow time, not the synthetic bypass of a production gate.
+- Retain a performance candidate only if its primary UNC workflow's paired median elapsed time improves by at least 15% in each of the two seven-pair sessions. U1 primary workflow: 100-file interactive loading; U2: 100-file UI disk search; U3: complete `unc-2/search-snapshot` workflow with admitted two-file UNC work (including resolver/protocol overhead); U4: complete 100-file idle monitor sweep. Record initialization and all other workflows too. Use complete workflow time, not the synthetic bypass of a production gate.
 - A protected local/single-file workflow must not regress by more than both 10% and 5 ms in median time; UI preview publication must not regress by more than both 10% and 16 ms. This combines a relative bound with a noise floor. All public resource caps remain unchanged; increasing an unbounded backlog or buffer lifetime is a rejection.
+- The UI client's `preview-or-index-publication` first-content metric uses the publication **16 ms** floor; its raw-preview latency is also checked separately with that floor and observed sample counts/kinds. Other protected UI workflows, including indexed reads and filtering, use **5 ms**. This maps measured metrics to the preceding fixed thresholds; it does not change them.
 - If sessions disagree or exceed regression bounds, repeat the entire two-session comparison once without changing thresholds. A still-inconclusive or regressing candidate is rejected and the preceding accepted runtime behavior is retained. Record the rejection and proceed with independent phases.
 - Do not infer tail latency from fourteen pairs, average away failures, remove outliers silently, increase timeouts, relax synchronization assertions, or change fixtures between baseline/candidate to make a candidate pass.
 
 ## Regression matrix
+
+The matrix includes evaluated trial requirements as well as retained contracts. First-turn interactive scanning, atomic multi-UNC admission and two-slot monitor preparation were tested in their archived trial commits and rejected under the measured decision rule; their feature-specific assertions are not requirements to reintroduce those designs into the final runtime. Final retained coverage instead proves creation-turn suspension, interactive continuity/ownership, shared single-UNC admission and sequential monitor semantics, together with the accepted four-worker UI policy. See the execution record for trial and restoration evidence.
 
 | Area | Required cases and assertions |
 | --- | --- |
@@ -95,17 +148,17 @@ Run all async WPF/view-model setup, assertions and cleanup on `WpfTestHost`. Wor
 
 ## Validation commands
 
-Run from the repository root. Commands below are future execution instructions, not checks performed for this documentation delivery. Confirm `dotnet --version` matches `global.json`. Build/test as separate awaited operations. Use Release, serial MSBuild and `UseSharedCompilation=false` consistently. Rebuild after any source/test change before `--no-build` testing. Restore failures must be resolved/reported, not hidden by stale binaries.
+Run from the repository root. These commands define the maintained validation lanes; actual completed U0-U5 results and exclusions are recorded in Results.md and ExecutionPlan.md. Confirm `dotnet --version` matches `global.json`. Build/test as separate awaited operations. Use Release, serial MSBuild and `UseSharedCompilation=false` consistently. Rebuild after any source/test change before `--no-build` testing. Restore failures must be resolved/reported, not hidden by stale binaries.
 
 ### V-Core
 
 ```powershell
 dotnet build LogReader/LogReader.Core.Tests/LogReader.Core.Tests.csproj -c Release -m:1 -p:UseSharedCompilation=false
-dotnet test LogReader/LogReader.Core.Tests/LogReader.Core.Tests.csproj -c Release --no-build --no-restore -m:1 --filter "FullyQualifiedName~InteractiveLogReaderTests|FullyQualifiedName~AdaptiveParallelismPolicyTests|FullyQualifiedName~SearchServiceTests|FullyQualifiedName~HeadlessLogQueryBackendTests|FullyQualifiedName~ResumableLogScannerTests|FullyQualifiedName~QueryContinuationStoreTests|FullyQualifiedName~McpContinuationSettingsTests|FullyQualifiedName~UncDiskOperationAdmissionTests"
+dotnet test LogReader/LogReader.Core.Tests/LogReader.Core.Tests.csproj -c Release --no-build --no-restore -m:1 --filter "FullyQualifiedName~InteractiveLogReaderTests|FullyQualifiedName~AdaptiveParallelismPolicyTests|FullyQualifiedName~SearchServiceTests|FullyQualifiedName~HeadlessLogQueryBackendTests|FullyQualifiedName~ResumableLogScannerTests|FullyQualifiedName~QueryContinuationStoreTests|FullyQualifiedName~McpContinuationSettingsTests"
 dotnet test LogReader/LogReader.Core.Tests/LogReader.Core.Tests.csproj -c Release --no-build --no-restore -m:1
 ```
 
-Select the relevant subset first for each phase. `HeadlessLogQueryBackendTests` is the actual partial class containing monitor, lifecycle and resumable tests; do not filter only by their filenames. Reserve `UncDiskOperationAdmissionTests` for new coordinator coverage. Include any differently named new fixture in the filter and verify selected/executed counts. Repeat changed concurrency coverage three consecutive times after the final relevant edit; a zero-test result fails the check.
+Select the relevant subset first for each phase. `HeadlessLogQueryBackendTests` is the actual partial class containing monitor, lifecycle and resumable tests; do not filter only by their filenames. The rejected U3 coordinator fixture is preserved in trial commit `6239a67`; retained admission/late-fault coverage is in the actual `HeadlessLogQueryBackendTests` partial class. Include any differently named new fixture in the filter and verify selected/executed counts. Repeat changed concurrency coverage three consecutive times after the final relevant edit; a zero-test result fails the check.
 
 ### V-UI
 

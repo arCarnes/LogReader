@@ -41,7 +41,7 @@ public class AdaptiveParallelismPolicyTests
             });
 
         Assert.Equal(5, plan.TargetCount);
-        Assert.Equal(2, plan.GlobalLimit);
+        Assert.Equal(4, plan.GlobalLimit);
         Assert.All(plan.Targets, target => Assert.Equal(@"\\server", target.TopLevelGroupKey));
         Assert.Equal(
             new[] { @"\\server\share-a", @"\\server\share-a", @"\\server\share-b", @"\\server\share-b", @"\\server\share-b" },
@@ -52,7 +52,7 @@ public class AdaptiveParallelismPolicyTests
 
         Assert.Equal(@"\\server", hostGroup.Key);
         Assert.Equal(5, hostGroup.TargetCount);
-        Assert.Equal(2, hostGroup.Limit);
+        Assert.Equal(4, hostGroup.Limit);
         Assert.Equal(2, shareGroups.Length);
 
         Assert.Contains(shareGroups, group =>
@@ -65,7 +65,7 @@ public class AdaptiveParallelismPolicyTests
             group.Key == @"\\server\share-b" &&
             group.ParentKey == @"\\server" &&
             group.TargetCount == 3 &&
-            group.Limit == 2);
+            group.Limit == 3);
     }
 
     [Fact]
@@ -104,13 +104,13 @@ public class AdaptiveParallelismPolicyTests
             });
 
         Assert.Equal(3, plan.TargetCount);
-        Assert.Equal(2, plan.GlobalLimit);
+        Assert.Equal(3, plan.GlobalLimit);
 
         var hostGroup = Assert.Single(plan.Groups, group => group.Kind == ParallelismGroupKind.UncHost);
         var shareGroup = Assert.Single(plan.Groups, group => group.Kind == ParallelismGroupKind.UncShare);
 
         Assert.Equal(3, hostGroup.Limit);
-        Assert.Equal(2, shareGroup.Limit);
+        Assert.Equal(3, shareGroup.Limit);
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public class AdaptiveParallelismPolicyTests
     }
 
     [Fact]
-    public void CreatePlan_DashboardAndSearchProduceDifferentLimitsForSameTargets()
+    public void CreatePlan_DashboardAndSearchShareTheFourWorkerUncLimit()
     {
         var targets = new[]
         {
@@ -172,9 +172,9 @@ public class AdaptiveParallelismPolicyTests
             AdaptiveParallelismOperation.DiskSearch,
             targets);
 
-        Assert.Equal(2, dashboardPlan.GlobalLimit);
-        Assert.Equal(3, searchPlan.GlobalLimit);
-        Assert.NotEqual(dashboardPlan.GlobalLimit, searchPlan.GlobalLimit);
+        Assert.Equal(4, dashboardPlan.GlobalLimit);
+        Assert.Equal(4, searchPlan.GlobalLimit);
+        Assert.Equal(dashboardPlan.Groups, searchPlan.Groups);
     }
 
     [Fact]

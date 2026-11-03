@@ -56,6 +56,7 @@ public sealed partial class HeadlessLogQueryBackendTests
         var first = await CreateFileAsync("monitor-init-a.log", "old\n");
         var second = await CreateFileAsync("monitor-init-b.log", "old\n");
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstCaptured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var scanner = new GatedMonitorScanner(async (path, _, ct) =>
         {
@@ -64,12 +65,12 @@ public sealed partial class HeadlessLogQueryBackendTests
                 ready.TrySetResult();
                 await release.Task.WaitAsync(ct);
             }
-        });
+        }, path => { if (path == first) firstCaptured.TrySetResult(); });
         using var backend = CreateBackend(CreateSnapshot(("first", first), ("second", second)), scanner: scanner);
         var initialization = backend.MonitorLogsAsync(MonitorStart("needle"));
         try
         {
-            await ready.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await Task.WhenAll(ready.Task, firstCaptured.Task).WaitAsync(TimeSpan.FromSeconds(3));
             await File.AppendAllTextAsync(first, "needle during initialization\n");
         }
         finally
@@ -381,7 +382,8 @@ public sealed partial class HeadlessLogQueryBackendTests
         Assert.Equal(1, page.Result.StoppedFileCount);
     }
 
-    private sealed class GatedMonitorScanner(Func<string, int, CancellationToken, Task> beforeOpen) : IResumableLogScanner
+    private sealed class GatedMonitorScanner(Func<string, int, CancellationToken, Task> beforeOpen,
+        Action<string>? afterOpen = null) : IResumableLogScanner
     {
         private readonly IResumableLogScanner _inner = new ResumableLogScanner(new FileEncodingDetectionService());
         private int _calls;
@@ -389,7 +391,17 @@ public sealed partial class HeadlessLogQueryBackendTests
         public async Task<IResumableLogScan> OpenAsync(string path, ResumableFileCheckpoint checkpoint, CancellationToken ct)
         {
             await beforeOpen(path, Interlocked.Increment(ref _calls), ct);
-            return await _inner.OpenAsync(path, checkpoint, ct);
+            var reader = await _inner.OpenAsync(path, checkpoint, ct);
+            try
+            {
+                afterOpen?.Invoke(path);
+                return reader;
+            }
+            catch
+            {
+                await reader.DisposeAsync();
+                throw;
+            }
         }
     }
 }

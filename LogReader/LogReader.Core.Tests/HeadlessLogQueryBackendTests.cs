@@ -1695,57 +1695,50 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     [Fact]
     public async Task SearchLogs_QueuedUncWorkDoesNotBlockConcurrentLocalQuery()
     {
-        var firstUnc = @"\\server\share\first.log";
-        var secondUnc = @"\\server\share\second.log";
+        string[] uncPaths = [@"\\server\share-a\first.log", @"\\server\share-b\second.log", @"\\server\share-c\third.log"];
         var local = await CreateFileAsync("local-interleave.log", "local");
-        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = new AdmissionWorkGate(1);
         var localStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var search = new ScriptedLogScanner(async (path, _, _, ct) =>
         {
-            if (path == firstUnc)
-            {
-                firstStarted.TrySetResult();
-                await releaseFirst.Task.WaitAsync(ct);
-            }
-            else if (path == local)
+            if (path == local)
             {
                 localStarted.TrySetResult();
+                return Result(path, "local");
             }
-
-            return Result(path, Path.GetFileNameWithoutExtension(path));
+            return await gate.ScanAsync(path, ct);
         });
         using var backend = CreateBackend(
-            CreateSnapshot(("first", firstUnc), ("second", secondUnc), ("local", local)),
+            CreateSnapshot(("first", uncPaths[0]), ("second", uncPaths[1]), ("third", uncPaths[2]), ("local", local)),
             scanner: search,
-            pathExists: _ => false,
-            encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
-
+            pathExists: _ => false, encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
         var uncTask = backend.SearchLogsAsync(new LogSearchQuery
         {
-            Targets = [new(ConfiguredLogTargetKind.LogFile, "first"), new(ConfiguredLogTargetKind.LogFile, "second")],
-            Query = "ignored"
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "first"), new(ConfiguredLogTargetKind.LogFile, "second"),
+                new(ConfiguredLogTargetKind.LogFile, "third")], Query = "ignored"
         });
         Task<LogOperationEnvelope<LogSearchResult>>? localTask = null;
         try
         {
-            await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await gate.Started.WaitAsync(TimeSpan.FromSeconds(2));
             localTask = backend.SearchLogsAsync(Search("local", "ignored", ConfiguredLogTargetKind.LogFile));
             await localStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(1, gate.Active);
+            Assert.Equal(1, gate.Calls); // The second lookahead file waits for shared UNC admission.
         }
         finally
         {
-            releaseFirst.TrySetResult();
+            gate.Release();
             await uncTask.WaitAsync(TimeSpan.FromSeconds(2));
-            if (localTask != null)
-                await localTask.WaitAsync(TimeSpan.FromSeconds(2));
+            if (localTask != null) await localTask.WaitAsync(TimeSpan.FromSeconds(2));
         }
         var response = await uncTask;
         Assert.Empty(response.Errors);
-        Assert.Equal(new[] { "first", "second" }, response.Result!.Files.Select(file => file.FileId));
-        Assert.InRange(response.Result.Statistics.PeakConcurrentDiskOperations, 1, 2);
+        Assert.Equal(new[] { "first", "second", "third" }, response.Result!.Files.Select(file => file.FileId));
+        Assert.Equal(1, response.Result.Statistics.PeakConcurrentDiskOperations);
         Assert.Equal(1, response.Result.Statistics.PeakConcurrentUncOperations);
         Assert.Equal("local", Assert.Single((await localTask!).Result!.Files).FileId);
+        Assert.Equal(0, gate.Active);
     }
 
     [Fact]
@@ -1775,47 +1768,65 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.DoesNotContain("needle", serialized, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public async Task SearchLogs_UncConcurrencyIsLimitedToOne()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task SearchLogs_UncConcurrencyPreservesSingleUncLimit(int limit)
     {
-        var paths = Enumerable.Range(0, 3)
-            .Select(index => $@"\\server\share\log-{index}.log")
-            .ToArray();
-        var search = new ConcurrencyTrackingScanner(TimeSpan.FromMilliseconds(30));
+        var paths = Enumerable.Range(0, 3).Select(index => $@"\\server\share\log-{index}.log").ToArray();
+        var gate = new AdmissionWorkGate(1);
+        var search = new ScriptedLogScanner((path, _, _, ct) => gate.ScanAsync(path, ct));
         using var backend = CreateBackend(
-            CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
-            scanner: search);
-
-        var response = await backend.SearchLogsAsync(Search("dashboard", "ignored"));
-
+            CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()), scanner: search,
+            limits: LogQueryEffectiveLimits.Default with { MaximumConcurrentDiskOperations = limit },
+            pathExists: _ => false, encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
+        var work = backend.SearchLogsAsync(Search("dashboard", "ignored"));
+        try
+        {
+            await gate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, gate.Active);
+        }
+        finally
+        {
+            gate.Release();
+            await work.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        var response = await work;
         Assert.Empty(response.Errors);
-        Assert.Equal(1, search.MaximumConcurrency);
+        Assert.Equal(1, gate.Peak);
+        Assert.Equal(1, response.Result!.Statistics.PeakConcurrentDiskOperations);
+        Assert.Equal(1, response.Result.Statistics.PeakConcurrentUncOperations);
+        Assert.Equal(0, gate.Active);
     }
 
     [Fact]
-    public async Task SearchLogs_UncCandidateProbesShareTheGlobalUncGate()
+    public async Task SearchLogs_UncCandidateProbesShareSingleUncAdmission()
     {
-        var paths = Enumerable.Range(0, 3)
-            .Select(index => $@"\\server\share\probe-{index}.log")
-            .ToArray();
-        var probes = new ConcurrencyTrackingPathExists(TimeSpan.FromMilliseconds(40));
-        var search = new ConcurrencyTrackingScanner(TimeSpan.FromMilliseconds(10));
+        var paths = Enumerable.Range(0, 3).Select(index => $@"\\server\share\probe-{index}.log").ToArray();
+        var gate = new AdmissionWorkGate(1);
+        var search = new ScriptedLogScanner((path, _, _, _) => Task.FromResult(Result(path, "hit")));
         using var backend = CreateBackend(
             CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
-            scanner: search,
-            pathExists: probes.Exists);
-
+            scanner: search, pathExists: gate.Probe, encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
         var requests = Enumerable.Range(0, 2)
-            .Select(_ => Task.Run(() => backend.SearchLogsAsync(Search("dashboard", "ignored"))))
-            .ToArray();
-        var responses = await Task.WhenAll(requests);
-
-        Assert.All(responses, response => Assert.Empty(response.Errors));
-        Assert.Equal(1, probes.MaximumConcurrency);
+            .Select(_ => Task.Run(() => backend.SearchLogsAsync(Search("dashboard", "ignored")))).ToArray();
+        try
+        {
+            await gate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, gate.Active);
+        }
+        finally
+        {
+            gate.Release();
+            await Task.WhenAll(requests).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.All(await Task.WhenAll(requests), response => Assert.Empty(response.Errors));
+        Assert.Equal(1, gate.Peak);
+        Assert.Equal(0, gate.Active);
     }
 
     [Fact]
-    public async Task SearchLogs_BlockedCandidateProbeHonorsDeadlineAndRetainsUncGate()
+    public async Task SearchLogs_BlockedCandidateProbeHonorsDeadlineAndRetainsExplicitSingleCapacity()
     {
         var path = @"\\server\share\blocked-probe.log";
         using var probes = new BlockingPathExists();
@@ -1825,31 +1836,41 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         using var backend = CreateBackend(
             CreateSnapshot(("file", path)),
             scanner: search,
+            limits: LogQueryEffectiveLimits.Default with { MaximumConcurrentDiskOperations = 1 },
             pathExists: probes.Exists,
             encodingDetection: encoding);
         var firstRequest = Search("dashboard", "ignored", timeoutMilliseconds: 100);
         var firstResponseTask = backend.SearchLogsAsync(firstRequest);
-        await probes.Started.WaitAsync(TimeSpan.FromSeconds(2));
+        try
+        {
+            await probes.Started.WaitAsync(TimeSpan.FromSeconds(2));
 
-        var firstResponse = await firstResponseTask.WaitAsync(TimeSpan.FromSeconds(2));
-        var secondRequest = Search("dashboard", "ignored", timeoutMilliseconds: 100);
-        var secondResponse = await backend.SearchLogsAsync(secondRequest)
-            .WaitAsync(TimeSpan.FromSeconds(2));
+            var firstResponse = await firstResponseTask.WaitAsync(TimeSpan.FromSeconds(2));
+            var secondRequest = Search("dashboard", "ignored", timeoutMilliseconds: 100);
+            var secondResponse = await backend.SearchLogsAsync(secondRequest)
+                .WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.Equal("deadline_exceeded", Assert.Single(firstResponse.Errors).Code);
-        Assert.Equal("deadline_exceeded", Assert.Single(secondResponse.Errors).Code);
-        Assert.Equal(1, probes.CallCount);
-        Assert.Equal(0, encoding.AutomaticResolutionCount);
+            Assert.Equal("deadline_exceeded", Assert.Single(firstResponse.Errors).Code);
+            Assert.Equal("deadline_exceeded", Assert.Single(secondResponse.Errors).Code);
+            Assert.Equal(1, probes.CallCount);
+            Assert.Equal(0, encoding.AutomaticResolutionCount);
 
-        probes.Release();
-        await probes.Completed.WaitAsync(TimeSpan.FromSeconds(2));
-        var finalResponse = await backend.SearchLogsAsync(Search("dashboard", "ignored"))
-            .WaitAsync(TimeSpan.FromSeconds(2));
+            probes.Release();
+            await probes.Completed.WaitAsync(TimeSpan.FromSeconds(2));
+            var finalResponse = await backend.SearchLogsAsync(Search("dashboard", "ignored"))
+                .WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.Empty(finalResponse.Errors);
-        Assert.Equal(2, probes.CallCount);
-        Assert.Equal(1, search.CallCount);
-        Assert.Equal(1, encoding.AutomaticResolutionCount);
+            Assert.Empty(finalResponse.Errors);
+            Assert.Equal(2, probes.CallCount);
+            Assert.Equal(1, search.CallCount);
+            Assert.Equal(1, encoding.AutomaticResolutionCount);
+        }
+        finally
+        {
+            probes.Release();
+            await firstResponseTask.WaitAsync(TimeSpan.FromSeconds(2));
+            await probes.Completed.WaitAsync(TimeSpan.FromSeconds(2));
+        }
     }
 
     [Fact]

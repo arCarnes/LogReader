@@ -2187,44 +2187,55 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task ClearDashboardModifierAsync_RestoresBaseDisplayAndScope()
     {
-        Directory.CreateDirectory(_testRoot);
-        var targetDate = DateTime.Today.AddDays(-1);
-        var basePath = Path.Combine(_testRoot, "restore.log");
-        var effectivePath = $"{basePath}{targetDate:yyyyMMdd}";
-        await File.WriteAllTextAsync(basePath, "base");
-        await File.WriteAllTextAsync(effectivePath, "effective");
-
-        var fileEntry = new LogFileEntry { FilePath = basePath };
-        var fileRepo = new StubLogFileRepository();
-        await fileRepo.AddAsync(fileEntry);
-        var groupRepo = new StubLogGroupRepository();
-        await groupRepo.AddAsync(new LogGroup
+        await WpfTestHost.RunAsync(async () =>
         {
-            Id = "dashboard-1",
-            Name = "Dashboard",
-            Kind = LogGroupKind.Dashboard,
-            FileIds = new List<string> { fileEntry.Id }
-        });
+            Directory.CreateDirectory(_testRoot);
+            var targetDate = DateTime.Today.AddDays(-1);
+            var basePath = Path.Combine(_testRoot, "restore.log");
+            var effectivePath = $"{basePath}{targetDate:yyyyMMdd}";
+            await File.WriteAllTextAsync(basePath, "base");
+            await File.WriteAllTextAsync(effectivePath, "effective");
 
-        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
-        await vm.InitializeAsync();
-
-        var dashboard = vm.Groups.Single();
-        await vm.ApplyDashboardModifierAsync(
-            dashboard,
-            daysBack: 1,
-            new ReplacementPattern
+            var fileEntry = new LogFileEntry { FilePath = basePath };
+            var fileRepo = new StubLogFileRepository();
+            await fileRepo.AddAsync(fileEntry);
+            var groupRepo = new StubLogGroupRepository();
+            await groupRepo.AddAsync(new LogGroup
             {
-                Id = "pattern-1",
-                FindPattern = ".log",
-                ReplacePattern = ".log{yyyyMMdd}"
+                Id = "dashboard-1",
+                Name = "Dashboard",
+                Kind = LogGroupKind.Dashboard,
+                FileIds = new List<string> { fileEntry.Id }
             });
 
-        await vm.ClearDashboardModifierAsync(dashboard);
+            var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+            try
+            {
+                await vm.InitializeAsync();
+                var dashboard = vm.Groups.Single();
+                await vm.ApplyDashboardModifierAsync(
+                    dashboard,
+                    daysBack: 1,
+                    new ReplacementPattern
+                    {
+                        Id = "pattern-1",
+                        FindPattern = ".log",
+                        ReplacePattern = ".log{yyyyMMdd}"
+                    });
+                await vm.ClearDashboardModifierAsync(dashboard);
+                await vm.DrainDashboardMemberRefreshAsync();
 
-        Assert.Equal("Dashboard", dashboard.DisplayName);
-        await WaitForConditionAsync(() => dashboard.MemberFiles.Any(member => string.Equals(member.FilePath, basePath, StringComparison.OrdinalIgnoreCase)));
-        await WaitForConditionAsync(() => vm.FilteredTabs.Any(tab => string.Equals(tab.FilePath, basePath, StringComparison.OrdinalIgnoreCase)));
+                Assert.Equal("Dashboard", dashboard.DisplayName);
+                Assert.Contains(dashboard.MemberFiles, member => string.Equals(member.FilePath, basePath, StringComparison.OrdinalIgnoreCase));
+                Assert.Contains(vm.FilteredTabs, tab => string.Equals(tab.FilePath, basePath, StringComparison.OrdinalIgnoreCase));
+            }
+            finally
+            {
+                vm.Dispose();
+                await WpfTestHost.DrainOwnedWorkAsync(vm.ShutdownTask);
+                _createdViewModels.Remove(vm);
+            }
+        });
     }
 
     [Fact]
