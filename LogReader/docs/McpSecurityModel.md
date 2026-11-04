@@ -2,7 +2,7 @@
 
 Status: Reviewed for v1
 
-Last updated: 2026-10-01
+Last updated: 2026-11-04
 
 ## Security posture
 
@@ -37,7 +37,7 @@ There is no separate WeezTail user identity. The Windows account that launches t
 - Search/count cursors are process-scoped HMAC-signed session/revision references with a 1,024-character decoder cap. Server state binds catalog revision, normalized query/targets/date offset, frozen windows, resolver/deduplication progress, file generations and counters. Every advance or replay reauthorizes membership; malformed, tampered, stale, expired, mismatched and prior-process tokens are rejected without accepting paths. State is bounded to 16 sessions, 15-minute idle expiry, 64 MiB retained state/session and 256 MiB accounted retained/working state/process. No unexpired session is silently evicted, and no log handles remain between calls.
 - An unchanged 30-second default/maximum request deadline and 800,000 response content characters per response. Cancellation is cooperative. The hit ceiling bounds enumeration; it does not guarantee a client token/context budget. A capped text query has explicit query_hit_limit partial/truncated evidence and no continuation, while countsOnly/count_logs can finish exact traversal. Search/count physical lines are limited to 8 MiB including their ending; regex matching retains the existing 250 ms timeout.
 - Complete provenance records consume at most 25% of the response character allowance. Oversized explanatory authorization-route metadata is returned as a deterministic prefix with total/truncated fields; search uses `provenance_metadata_limit`, while count-file compaction uses `count_metadata_limit`. Metadata compaction does not alter numeric exactness.
-- At most two disk-heavy operations and one UNC operation per process.
+- Per process, disk admission allows eight operations globally, four per UNC host and share, two per local root, and one for unknown paths. Multiple shares on the same host share its four slots, and normalized case/extended-path aliases share capacity. At most two heavy requests execute concurrently; search/count look ahead by two files and monitoring remains sequential. Detached OS probes retain admission and backend lifetime until actual completion, including cancellation and late faults.
 - At most four retained indexed sessions, 2,000,000 mapped offsets, and 30 seconds of warm retention per process.
 - Cancellation is propagated through MCP, query, reader, search, and index-building layers.
 - File replacement, truncation, deletion, reappearance, invalid encodings, oversized lines, and incomplete final lines have regression coverage.
@@ -49,7 +49,7 @@ Monitoring accepts configured IDs only and privately retains normalized authoriz
 
 Monitor state shares existing session/working-memory admission and 15-minute default idle expiry. File checkpoints and bounded partial lines are retained in process memory; no log handles or background polling remain between calls. Explicit release clears file checkpoints, with bounded replay metadata retained until expiry/admission. Snapshot export is opt-in, has the same bounded lifetime, and transfers only fully committed verified boundaries. A failed handoff never starts a new historical scan or hidden observer. Regex inclusion/exclusion retain the 250 ms per-match timeout and 8 MiB maximum physical line span.
 
-Disk operations retain the process-wide two-disk/one-UNC gates and current Windows account access. No listener, daemon, UI broker, credentials, dependency upgrade or new path-authority channel was added. Local measurements, real UNC measurements and deterministic simulated UNC contention are recorded separately in [consistency evidence](McpToolConsistencyMeasurements.md). Real UNC testing used only dedicated children of the user-authorized test root, without parent or sibling enumeration. The optional measurement root is a test-harness input, not an MCP path-authority channel. As before, filesystem metadata cannot prove an atomic snapshot or detect every possible concurrent in-place rewrite.
+Disk operations use the process-local topology-aware admission bounds described above and current Windows account access. Higher admission can increase storage or network contention; the measured tradeoff is recorded in [MCP admission measurements](McpAdmissionMeasurements.md). No listener, daemon, UI broker, credentials, dependency upgrade or new path-authority channel was added. Local measurements, real UNC measurements and deterministic simulated UNC contention are recorded separately in [consistency evidence](McpToolConsistencyMeasurements.md). Real UNC testing used only dedicated children of the user-authorized test root, without parent or sibling enumeration. The optional measurement root is a test-harness input, not an MCP path-authority channel. As before, filesystem metadata cannot prove an atomic snapshot or detect every possible concurrent in-place rewrite.
 
 ## Residual risks
 
