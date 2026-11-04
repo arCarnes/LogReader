@@ -10,7 +10,7 @@ using Microsoft.Extensions.AI;
 internal static class McpResponseJsonPolicy
 {
     internal const string SnapshotSearchDescription =
-        "Bounded snapshot: each file's extent is frozen when first opened; appended data is excluded. Once nextCursor is absent, report observed results with any incompleteReasons as caveats. Do not restart or rescan changed files unless the user requests a fresh scan. Use monitor_logs only when the user explicitly requests observation over time; read_log_tail remains available for single-file compatibility.";
+        "Bounded snapshot: each file's extent is frozen when first opened; appended data is excluded. file_grew_during_scan means growth beyond that extent, not established replacement, corruption or invalidation. Returned evidence remains reportable; growth does not prove append-only writes or exact historical contents. Respect completeness/count-exactness flags. Continue an existing nextCursor as needed to finish the user's task. Once nextCursor is absent, report observed results with incompleteReasons as caveats. Do not issue a fresh search, count, read, discovery, status, tail or monitoring call solely to clear a growth caveat. Newer data or observation over time must be independently required by the user's request. Do not restart other uncertain scans unless the user requests a fresh scan.";
     internal const string SearchCursorDescription =
         "Resume nextCursor with all query arguments unchanged, including resultMode, context and hit/file limits. Only provenanceMode, includeStatistics and timeoutMilliseconds may change. Process-local; idle expiry defaults to 15 minutes (server_status). On mismatch restore original arguments; on stale catalog rediscover the authorized scope. Expiry or process restart ends continuity: report the gap and terminal uncertainty; start a fresh investigation only when requested.";
     internal const string CountCursorDescription =
@@ -219,7 +219,7 @@ internal static class McpResponseJsonPolicy
                             "file" => "Omitted on idle and filtered no-match cursor polls; initial reads, matches, changes, and errors include it.",
                             "nextCursor" => "Use the advanced cursor even when no matches/file are returned. Omitted on idle: reuse the submitted cursor. Repeat query/useRegex/caseSensitive unchanged.",
                             "totalLineCount" => "Omitted when isIdle is true; otherwise the snapshot line count.",
-                            "generationChanged" => "True: retained results belong to an obsolete file generation; reset them before applying this bounded current tail. Omitted means false.",
+                            "generationChanged" => "True: retained results belong to an obsolete file generation; reset them before applying this bounded current tail. Ordinary growth alone does not set this flag. Omitted means false.",
                             "lastLineUpdated" => "True: replace the retained unfinished line with the returned line having the same number in this file generation; apply removedLineNumber if present. Omitted means false.",
                             _ => "Omitted when empty."
                         };
@@ -260,8 +260,8 @@ internal static class McpResponseJsonPolicy
             Describe("pageMatchOccurrenceCount", "Occurrences observed in this response's committed file segments; a line may contribute more than one.");
             Describe("returnedHitCount", "Hit-line records returned in this response, not all observed matches or occurrences.");
             Describe("queryReturnedHitCount", "Cumulative hit-line records emitted so far; replace the previous value. Bounded by maxQueryHits in text modes.");
-            Describe("isPageComplete", "Current committed page segments have no scan errors/incomplete reasons. May be true while a file's frozen extent remains unfinished; check isQueryComplete and per-file isCountExact.");
-            Describe("isQueryComplete", "True only when the whole selected frozen scope has finished successfully with exact counts. Text/provenance truncation alone does not make numeric counts inexact. No cursor alone does not prove completion.");
+            Describe("isPageComplete", "Current committed page segments have no scan errors/incomplete reasons. May be true while a file's frozen extent remains unfinished; check isQueryComplete and per-file isCountExact. A growth caveat does not instruct a fresh operation.");
+            Describe("isQueryComplete", "True only when the whole selected frozen scope has finished successfully with exact counts. Text/provenance truncation alone does not make numeric counts inexact. No cursor alone does not prove completion. False may reflect file growth; it does not instruct a fresh operation.");
             Describe("pageOmittedZeroHitFileCount", "Clean exact zero-hit file segments omitted from this response's files array.");
         }
         if (type == typeof(LogSearchResult) || type == typeof(LogCountResult))
@@ -297,31 +297,33 @@ internal static class McpResponseJsonPolicy
         if (type == typeof(LogMonitorEvent))
         {
             Describe("byteOffset", "Stable line identity within this file/generation; no full-file index or absolute line numbering is implied.");
-            Describe("kind", "appended adds an observed line, updated replaces that identity, removed deletes a formerly matching unfinished line. Apply each committed batch once.");
+            Describe("kind", "appended adds an observed line, updated replaces that identity, removed deletes a formerly matching unfinished line. Apply each committed batch once. Growth and unfinished-line updates are expected observation, not instructions to restart or run a historical search/count.");
             properties["kind"]!["enum"] = new JsonArray("appended", "updated", "removed");
             properties["byteOffset"]!["minimum"] = 0;
         }
         if (type == typeof(LogSearchFileResult))
         {
+            Describe("incompleteReasons", SnapshotSearchDescription);
             Describe("matchingLineCount", "Observed matching lines in this response's file segment, not a cumulative per-file total.");
             Describe("matchOccurrenceCount", "Observed occurrences in this response's file segment; may exceed matchingLineCount.");
-            Describe("isCountExact", "True only after this file's frozen extent is fully evaluated without scan uncertainty/errors. Text/provenance truncation alone does not make counts inexact.");
+            Describe("isCountExact", "True only after this file's frozen extent is fully evaluated without scan uncertainty/errors. Text/provenance truncation alone does not make counts inexact. Growth can keep this false without invalidating returned evidence or instructing a recount.");
         }
         if (type == typeof(LogCountResult))
         {
             Describe("incompleteReasons", SnapshotSearchDescription);
             Describe("matchingLineCount", "Cumulative observed matching lines; replace prior totals. Exact only when isComplete is true.");
             Describe("matchOccurrenceCount", "Cumulative observed occurrences; a line can contain multiple. Replace prior totals; exact only when isComplete is true.");
-            Describe("isComplete", "Whole selected frozen scope successfully evaluated with exact aggregate/bucket counts. Metadata/provenance compaction alone does not make these counts inexact. Check incompleteReasons even without a cursor.");
+            Describe("isComplete", "Whole selected frozen scope successfully evaluated with exact aggregate/bucket counts. Metadata/provenance compaction alone does not make these counts inexact. Check incompleteReasons even without a cursor. False may reflect file growth; it does not instruct a recount.");
             Describe("files", "Cumulative matched/error/incomplete file evidence; replace earlier records. Clean zero-count files are omitted; metadata may be compacted as disclosed by isFileRecordTruncated.");
             Describe("isFileRecordTruncated", "Per-file metadata was compacted; files is not a full inventory. Aggregate/bucket count exactness is independent of this flag.");
             Describe("resolvedTimeRange", "Inclusive bounds captured on the first call and frozen across continuations; independent of rolling-file selection by dateOffsetDays.");
         }
         if (type == typeof(LogCountFileResult))
         {
+            Describe("incompleteReasons", SnapshotSearchDescription);
             Describe("matchingLineCount", "Cumulative observed matching lines for this file; replace prior values.");
             Describe("matchOccurrenceCount", "Cumulative observed occurrences for this file; replace prior values.");
-            Describe("isCountExact", "True when this file's frozen extent was evaluated without scan uncertainty/errors; metadata/provenance compaction alone does not affect numeric exactness.");
+            Describe("isCountExact", "True when this file's frozen extent was evaluated without scan uncertainty/errors; metadata/provenance compaction alone does not affect numeric exactness. Growth can keep this false without invalidating returned evidence or instructing a recount.");
         }
         if (type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) || type == typeof(LogReadFileResult))
             Describe("error", "File-level failure; inspect even if envelope.errors is empty. Omitted means no file error; counts may be observed/inexact.");
@@ -333,7 +335,7 @@ internal static class McpResponseJsonPolicy
             Describe("depthTruncated", "Deeper descendants were omitted. Query boundary groups with hasChildren by rootGroupId to discover them; maxDepth cannot exceed 20.");
         }
         if (type == typeof(LogReadLinesResult))
-            Describe("actualEndLine", "Last emitted one-based line; when present, advance with actualEndLine + 1. Absent/null means no emitted line boundary (for example a range past the current end); inspect file.error.");
+            Describe("actualEndLine", "Last emitted one-based line; when present, advance with actualEndLine + 1. Absent/null means no emitted line boundary (for example a range past the current end); inspect file.error. A successful bounded read does not require refreshing solely because the file later grows.");
         if (type == typeof(LogLineResult) || type == typeof(LogSearchExcerptLine))
         {
             Describe("text", "Normalized, character-bounded line text; isTruncated indicates an excerpt rather than the full physical line.");

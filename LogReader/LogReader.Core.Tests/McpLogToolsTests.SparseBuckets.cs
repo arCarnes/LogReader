@@ -39,7 +39,7 @@ public sealed partial class McpLogToolsTests
             Assert.Equal("sparse", result.GetProperty("bucketMode").GetString());
             Assert.False(result.TryGetProperty("buckets", out _));
             Assert.Equal<LogCountBucket>(count.Buckets, ReconstructBuckets(result));
-            Assert.Equal(3, result.GetProperty("contractVersion").GetInt32());
+            Assert.Equal(4, result.GetProperty("contractVersion").GetInt32());
             Assert.Equal(JsonSerializer.SerializeToElement(count.ResolvedTimeRange, ModelContextProtocol.McpJsonUtilities.DefaultOptions).GetRawText(),
                 result.GetProperty("resolvedTimeRange").GetRawText());
             Assert.True(result.GetProperty("isComplete").GetBoolean());

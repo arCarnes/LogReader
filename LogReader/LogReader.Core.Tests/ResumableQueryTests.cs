@@ -287,7 +287,7 @@ public sealed partial class HeadlessLogQueryBackendTests
             [new(ConfiguredLogTargetKind.LogFile, "file")], "needle", maxQueryHits: 1);
         var envelope = response.StructuredContent!.Value;
         var result = envelope.GetProperty("result");
-        Assert.Equal(6, result.GetProperty("contractVersion").GetInt32());
+        Assert.Equal(7, result.GetProperty("contractVersion").GetInt32());
         Assert.Equal(1, result.GetProperty("maxQueryHits").GetInt32());
         Assert.Equal(1, result.GetProperty("queryReturnedHitCount").GetInt32());
         Assert.False(result.TryGetProperty("nextCursor", out _));
@@ -953,7 +953,8 @@ public sealed partial class HeadlessLogQueryBackendTests
         Assert.True(result.IsTraversalComplete);
         Assert.False(result.IsQueryComplete);
         Assert.Equal(2, result.MatchingLineCount);
-        Assert.Contains("file_changed_during_search", result.IncompleteReasons);
+        Assert.Equal("file_grew_during_scan", Assert.Single(result.IncompleteReasons));
+        Assert.DoesNotContain("file_changed_during_search", result.IncompleteReasons);
     }
 
     [Fact]

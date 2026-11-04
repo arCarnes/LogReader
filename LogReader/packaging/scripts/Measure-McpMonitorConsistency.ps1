@@ -117,7 +117,7 @@ function Invoke-MonitorConsistencyMeasurement {
         $snapshot = $source.Response.result.structuredContent.result
     }
     if ($snapshot.matchingLineCount -ne 2 -or -not $snapshot.isTraversalComplete -or $snapshot.isQueryComplete -or
-        $snapshot.incompleteReasons -notcontains 'file_changed_during_search' -or [string]::IsNullOrEmpty($snapshot.handoffCursor)) {
+        $snapshot.incompleteReasons -notcontains 'file_grew_during_scan' -or [string]::IsNullOrEmpty($snapshot.handoffCursor)) {
         throw "Snapshot extent/terminal uncertainty differed: matches=$($snapshot.matchingLineCount), traversal=$($snapshot.isTraversalComplete), exact=$($snapshot.isQueryComplete), reasons=$($snapshot.incompleteReasons -join ',')."
     }
     $handoff = Invoke-MonitorSample 'explicit_handoff' @{ handoffCursor = $snapshot.handoffCursor; timeoutMilliseconds = $Timeout }

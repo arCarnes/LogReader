@@ -21,14 +21,16 @@ public sealed partial class McpLogToolsTests
         Assert.Contains("result presence", guidance, StringComparison.Ordinal);
         Assert.Contains("nested file errors", guidance, StringComparison.Ordinal);
         Assert.Contains("report observed results with caveats", guidance, StringComparison.Ordinal);
-        Assert.Contains("do not rescan changed files unless asked", guidance, StringComparison.Ordinal);
+        Assert.Contains("file_grew_during_scan", guidance, StringComparison.Ordinal);
+        Assert.Contains("not proven invalidation", guidance, StringComparison.Ordinal);
+        Assert.Contains("no extra tool calls solely to clear it", guidance, StringComparison.Ordinal);
         Assert.Contains("monitor_logs only for explicit observation", guidance, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("search_logs")]
     [InlineData("count_logs")]
-    public void SnapshotGuidance_ReportsUncertaintyWithoutRestartingChangedFileScans(string toolName)
+    public void SnapshotGuidance_ReportsGrowthWithoutStartingRepairOperations(string toolName)
     {
         using var backend = new RecordingBackend();
         var tool = McpLogTools.CreateToolCollection(backend)[toolName].ProtocolTool;
@@ -38,11 +40,44 @@ public sealed partial class McpLogToolsTests
         Assert.Contains("appended data is excluded", tool.Description, StringComparison.Ordinal);
         Assert.Contains("Once nextCursor is absent, report observed results", reasons, StringComparison.Ordinal);
         Assert.Contains("incompleteReasons as caveats", reasons, StringComparison.Ordinal);
-        Assert.Contains("Do not restart or rescan changed files unless the user requests a fresh scan", reasons, StringComparison.Ordinal);
-        Assert.Contains("monitor_logs only when the user explicitly requests observation over time", reasons, StringComparison.Ordinal);
+        Assert.Contains("file_grew_during_scan", reasons, StringComparison.Ordinal);
+        Assert.Contains("not established replacement, corruption or invalidation", reasons, StringComparison.Ordinal);
+        Assert.Contains("Returned evidence remains reportable", reasons, StringComparison.Ordinal);
+        Assert.Contains("does not prove append-only writes or exact historical contents", reasons, StringComparison.Ordinal);
+        Assert.Contains("Respect completeness/count-exactness flags", reasons, StringComparison.Ordinal);
+        Assert.Contains("Continue an existing nextCursor as needed to finish the user's task", reasons, StringComparison.Ordinal);
+        Assert.Contains("fresh search, count, read, discovery, status, tail or monitoring call solely to clear a growth caveat", reasons, StringComparison.Ordinal);
+        Assert.Contains("independently required by the user's request", reasons, StringComparison.Ordinal);
+        Assert.DoesNotContain("file_changed_during_search", reasons, StringComparison.Ordinal);
         Assert.EndsWith(reasons, tool.Description, StringComparison.Ordinal);
+        var file = result.GetProperty("files").GetProperty("items").GetProperty("properties");
+        Assert.Equal(reasons, file.GetProperty("incompleteReasons").GetProperty("description").GetString());
+        Assert.Contains("Growth can keep this false", file.GetProperty("isCountExact").GetProperty("description").GetString(), StringComparison.Ordinal);
+        var completion = toolName == "search_logs" ? "isQueryComplete" : "isComplete";
+        Assert.Contains("False may reflect file growth", result.GetProperty(completion).GetProperty("description").GetString(), StringComparison.Ordinal);
         if (toolName == "search_logs")
             Assert.Equal(reasons, result.GetProperty("pageIncompleteReasons").GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public void ReadAndObservationGuidance_TreatsGrowthAsExpectedWithoutRepairScans()
+    {
+        using var backend = new RecordingBackend();
+        var tools = McpLogTools.CreateToolCollection(backend);
+        var read = tools["read_log_lines"].ProtocolTool;
+        Assert.Contains("needs no refresh solely because the file later grows", read.Description, StringComparison.Ordinal);
+        var readResult = read.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
+        Assert.Contains("does not require refreshing solely", readResult.GetProperty("actualEndLine").GetProperty("description").GetString(), StringComparison.Ordinal);
+        var tail = tools["read_log_tail"].ProtocolTool;
+        Assert.Contains("Ordinary growth is expected, not a generation change", tail.Description, StringComparison.Ordinal);
+        Assert.Contains("existing cursor for an already requested observation", tail.Description, StringComparison.Ordinal);
+        Assert.Contains("do not start a historical search/count solely because of growth", tail.Description, StringComparison.Ordinal);
+        var tailResult = tail.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
+        Assert.Contains("Ordinary growth alone does not set this flag", tailResult.GetProperty("generationChanged").GetProperty("description").GetString(), StringComparison.Ordinal);
+        var monitor = tools["monitor_logs"].ProtocolTool;
+        Assert.Contains("Growth is expected", monitor.Description, StringComparison.Ordinal);
+        Assert.Contains("Replacement, truncation, encoding changes or detected incompatible edits", monitor.Description, StringComparison.Ordinal);
+        Assert.Contains("never start monitoring merely to repair snapshot uncertainty", monitor.Description, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -40,7 +40,7 @@ Both 100-file idle rounds checked exactly 100 files in ten polls, read zero scan
 
 A 600,000-character nonmatching hot line consumed only its per-file slice. The quiet file delivered its match during that scope round while hot-file backlog remained; two further rounds drained it. Immediate-previous-cursor replay returned the identical committed envelope, with no second event application.
 
-The end-to-end source returned one hit per bounded response, froze its file extent, then received a controlled append. Continuing that same investigation returned exactly its two original matches and terminal `file_changed_during_search` uncertainty. Explicit handoff delivered exactly the post-extent append. No snapshot refresh or fallback scan occurred, and both observations were released.
+The end-to-end source returned one hit per bounded response, froze its file extent, then received a controlled append. Continuing that same investigation returned exactly its two original matches and terminal `file_changed_during_search` uncertainty (the historical code, now named `file_grew_during_scan` in search contract 7/count contract 4). Explicit handoff delivered exactly the post-extent append. No snapshot refresh or fallback scan occurred, and both observations were released.
 
 Cold/warm search and count returned exact stable totals of 1/10/100 for both storage kinds. Legacy single-file unfiltered/filtered initial, idle, nonmatching and matching tail calls passed schema/content checks. Query statistics observed peak UNC concurrency 1 on the real share and 0 for local fixtures. Full compatibility tests cover every supported legacy result mode.
 

@@ -50,18 +50,18 @@ public sealed class McpLogTools
             CreateQueryTool<LogCountResult>(
                 tools, nameof(CountLogsAsync),
                 "count_logs",
-                "Count matching lines and occurrences over configured targets, with optional minute/hour/day buckets. Follow nextCursor; results replace cumulative totals. Check isComplete; changed-file counts are observed counts. No log text. " + McpResponseJsonPolicy.SnapshotSearchDescription),
+                "Count matching lines and occurrences over configured targets, with optional minute/hour/day buckets. Follow nextCursor; results replace cumulative totals. Check isComplete; growth-qualified counts remain observed counts, not a recount request. No log text. " + McpResponseJsonPolicy.SnapshotSearchDescription),
             CreateQueryTool<LogReadLinesResult>(
                 tools, nameof(ReadLogLinesAsync),
                 "read_log_lines",
-                "Read a bounded one-based line range from a configured file ID. Advance with actualEndLine + 1 when present. Text is normalized and character-bounded; inspect file.error."),
+                "Read a bounded one-based line range from a configured file ID. Advance with actualEndLine + 1 when present. Text is normalized and character-bounded; inspect file.error. A successful bounded read needs no refresh solely because the file later grows."),
             CreateQueryTool<LogReadTailResult>(
                 tools, nameof(ReadLogTailAsync),
                 "read_log_tail",
-                "Read a file's end or poll append events with a process-scoped cursor. Optional literal/regex filters return matches and skipped counts; repeat the filter. Idle polls omit file and nextCursor: reuse the submitted cursor. Restart invalidates cursors; rotation/truncation is explicit."),
+                "Read a file's end or poll append events with a process-scoped cursor. Optional literal/regex filters return matches and skipped counts; repeat the filter. Idle polls omit file and nextCursor: reuse the submitted cursor. Restart invalidates cursors; rotation/truncation is explicit. Ordinary growth is expected, not a generation change. Use the existing cursor for an already requested observation; do not start a historical search/count solely because of growth."),
             CreateQueryTool<LogMonitorResult>(
                 tools, nameof(MonitorLogsAsync), "monitor_logs",
-                "Explicitly observe configured folder/dashboard/file targets from captured file ends. No history scan. One selected rolling date; at most 100 physical files. Poll with only the returned cursor and bounded controls. Empty matches do not establish idle: inspect isScopeChecked, isCaughtUp, backlogFileCount and per-file errors. Apply events by file/generation/byteOffset; updated replaces, removed deletes. Same-path changes stop the affected file. release=true ends observation. Process-local expiry and replay rules apply; never start monitoring merely to repair snapshot uncertainty."),
+                "Explicitly observe configured folder/dashboard/file targets from captured file ends. No history scan. One selected rolling date; at most 100 physical files. Poll with only the returned cursor and bounded controls. Empty matches do not establish idle: inspect isScopeChecked, isCaughtUp, backlogFileCount and per-file errors. Apply events by file/generation/byteOffset; updated replaces, removed deletes. Growth is expected. Replacement, truncation, encoding changes or detected incompatible edits stop the affected file. release=true ends observation. Process-local expiry and replay rules apply; never start monitoring merely to repair snapshot uncertainty."),
             CreateQueryTool<McpLogServerStatus>(
                 tools, nameof(ServerStatusToolAsync), "server_status",
                 "Report catalog/backend readiness, effective caps/defaults and indexed-cache usage. Individual configured files may still be unreadable. Continuation limits are capacities, not current usage.",

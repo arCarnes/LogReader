@@ -102,6 +102,8 @@ internal sealed class ResumableScanReader(FileStream stream) : IAsyncDisposable
 /// <summary>Reads an explicit frozen extent and retains logical, rather than buffered-stream, positions.</summary>
 internal sealed class ResumableLogScanner : IResumableLogScanner
 {
+    internal const string FileGrewDuringScan = "file_grew_during_scan";
+
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<SearchRequest, PreparedLineFilter> _filters = new();
     private const int BufferBytes = 256 * 1024;
     private readonly IEncodingDetectionService _encodingDetection;
@@ -184,7 +186,7 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
                      length == state.ObservedLength && write != state.ObservedWriteUtc)
                 throw new ScanFileException("log_generation_changed");
             if (length != state.InitialLength || write != state.LastWriteUtc)
-                state.Reasons.Add("file_changed_during_search");
+                state.Reasons.Add(FileGrewDuringScan);
             state.ObservedLength = length;
             state.ObservedWriteUtc = write;
             stream.Position = state.ReadOffset;
@@ -204,7 +206,7 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
         if (length < state.ObservedLength || length == state.ObservedLength && write != state.ObservedWriteUtc)
             throw new ScanFileException("log_generation_changed");
         if (length != state.InitialLength || write != state.LastWriteUtc)
-            state.Reasons.Add("file_changed_during_search");
+            state.Reasons.Add(FileGrewDuringScan);
         state.ObservedLength = length;
         state.ObservedWriteUtc = write;
         if (!state.Generation.IsKnown)

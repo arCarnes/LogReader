@@ -54,7 +54,7 @@ public sealed class LogSearchResult
 
     public LogCountResolvedTimeRange? ResolvedTimeRange { get; init; }
 
-    public const int CurrentContractVersion = 6;
+    public const int CurrentContractVersion = 7;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
 
@@ -195,7 +195,7 @@ public sealed class LogCountResult
 
     public LogTimestampCoverage TimestampCoverage { get; init; } = new(0, 0, 0);
 
-    public const int CurrentContractVersion = 3;
+    public const int CurrentContractVersion = 4;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
 

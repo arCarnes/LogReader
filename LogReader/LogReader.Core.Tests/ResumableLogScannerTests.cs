@@ -101,13 +101,86 @@ public sealed class ResumableLogScannerTests
                 while (!state.Done)
                     await scanner.ReadNextAsync(reader, state, request, null, new ScanWorkBudget(1000, 1024), 1024, default);
                 Assert.Equal(extent, state.ReadOffset);
-                Assert.Contains("file_changed_during_search", state.Reasons);
+                Assert.Equal("file_grew_during_scan", Assert.Single(state.Reasons));
+                Assert.DoesNotContain("file_changed_during_search", state.Reasons);
             }
             await File.WriteAllTextAsync(path, "x");
             var error = await Assert.ThrowsAsync<ScanFileException>(() => scanner.OpenAsync(path, state, default));
             Assert.Equal("log_generation_changed", error.Code);
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task FrozenExtentGrowthDuringReadRemainsACaveatAndExcludesNewBytes()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(path, "needle\nneedle\n");
+            var scanner = new ResumableLogScanner(new FixedEncoding(FileEncoding.Utf8));
+            var state = new ResumableFileCheckpoint();
+            var request = SearchRequest.Create("needle", false, false, [path],
+                SearchRequestSourceMode.DiskSnapshot, SearchRequestUsage.DiskSearch);
+            await using var reader = await scanner.OpenAsync(path, state, default);
+            var extent = state.Extent;
+            var first = await scanner.ReadNextAsync(reader, state, request, null,
+                new ScanWorkBudget(1000, 1024), 1024, default);
+            Assert.Equal(1, first!.Number);
+            await File.AppendAllTextAsync(path, "needle appended\n");
+            scanner.ValidateAfterRead(reader.Stream, state);
+            Assert.Equal("file_grew_during_scan", Assert.Single(state.Reasons));
+            Assert.DoesNotContain("file_changed_during_search", state.Reasons);
+            var lines = new List<EvaluatedScanLine> { first };
+            for (var attempt = 0; !state.Done && attempt < 10; attempt++)
+            {
+                var line = await scanner.ReadNextAsync(reader, state, request, null,
+                    new ScanWorkBudget(1000, 1024), 1024, default);
+                if (line != null) lines.Add(line);
+            }
+            scanner.ValidateAfterRead(reader.Stream, state);
+            Assert.True(state.Done);
+            Assert.Equal(extent, state.Extent);
+            Assert.Equal(extent, state.ReadOffset);
+            Assert.True(state.ObservedLength > extent);
+            Assert.Equal(new[] { "needle", "needle" }, lines.Select(line => line.Text));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("replace")]
+    [InlineData("truncate")]
+    [InlineData("same-size-edit")]
+    public async Task IncompatibleChangesStillRejectContinuation(string change)
+    {
+        var path = Path.GetTempFileName();
+        var replacement = path + ".replacement";
+        try
+        {
+            await File.WriteAllTextAsync(path, "needle\n");
+            var scanner = new ResumableLogScanner(new FixedEncoding(FileEncoding.Utf8));
+            var state = new ResumableFileCheckpoint();
+            await using (var reader = await scanner.OpenAsync(path, state, default)) { }
+            if (change == "replace")
+            {
+                await File.WriteAllTextAsync(replacement, "needle\n");
+                File.Move(replacement, path, overwrite: true);
+            }
+            else
+            {
+                await File.WriteAllTextAsync(path, change == "truncate" ? "x" : "other!\n");
+                File.SetLastWriteTimeUtc(path, state.ObservedWriteUtc.AddMinutes(1));
+            }
+            var error = await Assert.ThrowsAsync<ScanFileException>(() => scanner.OpenAsync(path, state, default));
+            Assert.Equal("log_generation_changed", error.Code);
+            Assert.Empty(state.Reasons);
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(replacement);
+        }
     }
 
     [Fact]

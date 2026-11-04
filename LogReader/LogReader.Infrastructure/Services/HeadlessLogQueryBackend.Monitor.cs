@@ -316,7 +316,7 @@ public sealed partial class HeadlessLogQueryBackend
         if (source.State is not QueryTraversal snapshot || !snapshot.ResolverFinished || snapshot.Predicate == null ||
             snapshot.Files.Count > MaximumMonitorFiles || snapshot.Files.Any(file => !file.Done || file.Pending.Count != 0 || file.Error != null ||
                 !file.Checkpoint.Initialized || !file.Checkpoint.Done || !file.Checkpoint.Generation.IsKnown ||
-                file.Checkpoint.Reasons.Any(reason => reason != "file_changed_during_search")))
+                file.Checkpoint.Reasons.Any(reason => reason != ResumableLogScanner.FileGrewDuringScan)))
             throw new ContinuationException("handoff_boundary_unavailable");
         var predicate = snapshot.Predicate.Clone();
         predicate.MaxHitsPerFile = null;

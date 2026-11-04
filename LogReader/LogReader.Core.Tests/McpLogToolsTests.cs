@@ -163,7 +163,7 @@ public sealed partial class McpLogToolsTests
             }
             if (toolName == "search_logs")
             {
-                Assert.Equal(6, result.GetProperty("contractVersion").GetInt32());
+                Assert.Equal(7, result.GetProperty("contractVersion").GetInt32());
                 var returnedHit = file.GetProperty("hits")[0];
                 Assert.Equal(2, returnedHit.GetProperty("lineNumber").GetInt64());
                 Assert.False(returnedHit.TryGetProperty("text", out _));
@@ -200,7 +200,7 @@ public sealed partial class McpLogToolsTests
             }
             else if (toolName == "count_logs")
             {
-                Assert.Equal(3, result.GetProperty("contractVersion").GetInt32());
+                Assert.Equal(4, result.GetProperty("contractVersion").GetInt32());
                 Assert.Equal(!incomplete, result.GetProperty("isComplete").GetBoolean());
                 Assert.False(result.TryGetProperty("areCountsExact", out _));
                 Assert.False(result.TryGetProperty("completionState", out _));
