@@ -2,10 +2,12 @@
 bin/
 obj/
 build-diag*.log
+*.binlog
 *_wpftmp.csproj
 
 # Test logs (runtime-generated)
 test-logs/
+TestResults/
 artifacts/
 
 # User-specific VS/Rider files
@@ -13,6 +15,9 @@ artifacts/
 *.user
 *.suo
 .idea/
+
+# Local Claude settings
+.claude/settings.local.json
 
 # NuGet
 *.nupkg
