@@ -422,14 +422,17 @@ public sealed partial class HeadlessLogQueryBackend
         return errors.ToImmutable();
     }
 
-    private static ConfiguredLogRequestError MonitorError(Exception ex, string fileId) => Error(
-        ex is ScanFileException scan ? scan.Code : ex is RegexMatchTimeoutException ? "regex_match_timeout" : "monitor_file_unavailable",
-        ex is RegexMatchTimeoutException
-            ? "The observation filter exceeded its regex match timeout. Report incomplete observation; changing the filter requires an explicitly requested new observation."
-            : ex is ScanFileException
-            ? "Observation stopped for this file because its content, encoding, or safe boundary cannot be continued. Report the gap; starting another observation requires explicit intent."
-            : "This file is unavailable. Its boundary was retained; healthy files can advance on the next bounded poll.",
-        retryable: ex is not (ScanFileException or RegexMatchTimeoutException), targetId: fileId);
+    private static ConfiguredLogRequestError MonitorError(Exception ex, string fileId) => ex switch
+    {
+        ScanFileException scan => Error(scan.Code,
+            "Observation stopped because the file's content, encoding or safe boundary cannot be continued. Report the gap; a new observation requires explicit intent.", targetId: fileId),
+        RegexMatchTimeoutException => Error("regex_match_timeout",
+            "The observation filter exceeded its match timeout. Report incomplete observation; changing the filter requires a new explicit observation.", targetId: fileId),
+        _ => ToFileError(ex, fileId) with
+        {
+            Message = "This file is unavailable. Its boundary was retained; healthy files can advance on the next bounded poll."
+        }
+    };
 
     private static bool MonitorHasBacklog(MonitorFile file)
         => !file.Stopped && (!file.Checkpoint.Done || file.Checkpoint.ObservedLength > file.Checkpoint.Extent);

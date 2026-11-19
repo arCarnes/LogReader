@@ -2288,51 +2288,66 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task SearchPanel_AllOpenTabs_DashboardDateShiftClear_UsesBaseMemberFilesOnly()
     {
-        Directory.CreateDirectory(_testRoot);
-        var basePath = Path.Combine(_testRoot, "clear-search.log");
-        var t1Path = $"{basePath}{DateTime.Today.AddDays(-1):yyyyMMdd}";
-        var t2Path = $"{basePath}{DateTime.Today.AddDays(-2):yyyyMMdd}";
-        await File.WriteAllTextAsync(basePath, "base");
-        await File.WriteAllTextAsync(t1Path, "t1");
-        await File.WriteAllTextAsync(t2Path, "t2");
-
-        var fileEntry = new LogFileEntry { FilePath = basePath };
-        var fileRepo = new StubLogFileRepository();
-        await fileRepo.AddAsync(fileEntry);
-        var groupRepo = new StubLogGroupRepository();
-        await groupRepo.AddAsync(new LogGroup
+        await WpfTestHost.RunAsync(async () =>
         {
-            Id = "dashboard-1",
-            Name = "Dashboard",
-            Kind = LogGroupKind.Dashboard,
-            FileIds = new List<string> { fileEntry.Id }
+            Directory.CreateDirectory(_testRoot);
+            var basePath = Path.Combine(_testRoot, "clear-search.log");
+            var t1Path = $"{basePath}{DateTime.Today.AddDays(-1):yyyyMMdd}";
+            var t2Path = $"{basePath}{DateTime.Today.AddDays(-2):yyyyMMdd}";
+            await File.WriteAllTextAsync(basePath, "base");
+            await File.WriteAllTextAsync(t1Path, "t1");
+            await File.WriteAllTextAsync(t2Path, "t2");
+
+            var fileEntry = new LogFileEntry { FilePath = basePath };
+            var fileRepo = new StubLogFileRepository();
+            await fileRepo.AddAsync(fileEntry);
+            var groupRepo = new StubLogGroupRepository();
+            await groupRepo.AddAsync(new LogGroup
+            {
+                Id = "dashboard-1",
+                Name = "Dashboard",
+                Kind = LogGroupKind.Dashboard,
+                FileIds = new List<string> { fileEntry.Id }
+            });
+            var search = new RecordingSearchService();
+            var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo, searchService: search);
+            try
+            {
+                await vm.InitializeAsync();
+
+                var dashboard = vm.Groups.Single();
+                var pattern = new ReplacementPattern
+                {
+                    Id = "pattern-1",
+                    FindPattern = ".log",
+                    ReplacePattern = ".log{yyyyMMdd}"
+                };
+
+                await vm.ApplyDashboardModifierAsync(dashboard, daysBack: 1, pattern);
+                await vm.DrainDashboardMemberRefreshAsync();
+                await vm.ApplyDashboardModifierAsync(dashboard, daysBack: 2, pattern);
+                await vm.DrainDashboardMemberRefreshAsync();
+                await vm.ClearDashboardModifierAsync(dashboard);
+                await vm.DrainDashboardMemberRefreshAsync();
+
+                vm.SearchPanel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+                vm.SearchPanel.Query = "scope";
+                await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+
+                Assert.NotNull(search.LastSearchFilesRequest);
+                Assert.Equal(new[] { basePath }, search.LastSearchFilesRequest!.FilePaths);
+                Assert.Contains(vm.Tabs, tab => string.Equals(tab.FilePath, t1Path, StringComparison.OrdinalIgnoreCase));
+                Assert.Contains(vm.Tabs, tab => string.Equals(tab.FilePath, t2Path, StringComparison.OrdinalIgnoreCase));
+                Assert.DoesNotContain(vm.FilteredTabs, tab => string.Equals(tab.FilePath, t1Path, StringComparison.OrdinalIgnoreCase));
+                Assert.DoesNotContain(vm.FilteredTabs, tab => string.Equals(tab.FilePath, t2Path, StringComparison.OrdinalIgnoreCase));
+            }
+            finally
+            {
+                vm.Dispose();
+                await WpfTestHost.DrainOwnedWorkAsync(vm.ShutdownTask);
+                _createdViewModels.Remove(vm);
+            }
         });
-        var search = new RecordingSearchService();
-        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo, searchService: search);
-        await vm.InitializeAsync();
-
-        var dashboard = vm.Groups.Single();
-        var pattern = new ReplacementPattern
-        {
-            Id = "pattern-1",
-            FindPattern = ".log",
-            ReplacePattern = ".log{yyyyMMdd}"
-        };
-
-        await vm.ApplyDashboardModifierAsync(dashboard, daysBack: 1, pattern);
-        await vm.ApplyDashboardModifierAsync(dashboard, daysBack: 2, pattern);
-        await vm.ClearDashboardModifierAsync(dashboard);
-
-        vm.SearchPanel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
-        vm.SearchPanel.Query = "scope";
-        await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
-
-        Assert.NotNull(search.LastSearchFilesRequest);
-        Assert.Equal(new[] { basePath }, search.LastSearchFilesRequest!.FilePaths);
-        Assert.Contains(vm.Tabs, tab => string.Equals(tab.FilePath, t1Path, StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(vm.Tabs, tab => string.Equals(tab.FilePath, t2Path, StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(vm.FilteredTabs, tab => string.Equals(tab.FilePath, t1Path, StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(vm.FilteredTabs, tab => string.Equals(tab.FilePath, t2Path, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

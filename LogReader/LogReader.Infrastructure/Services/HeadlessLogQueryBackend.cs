@@ -163,6 +163,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             count,
             request.DateOffsetDays,
             request.TimeoutMilliseconds);
+        if (request.Anchor is not ("start" or "end") || request.Offset < 0)
+            return Rejected<LogReadLinesResult>(requestId, [Error("invalid_read_range", "anchor must be start or end and offset must be nonnegative.")]);
         if (!validation.IsEmpty)
             return Rejected<LogReadLinesResult>(requestId, validation);
 
@@ -200,7 +202,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                         {
                             using var lease = _indexedSessions.AcquireSession(file.PhysicalPath);
                             var snapshot = await lease.CaptureCurrentIndexAsync(
-                                [new IndexedLogReadRange(request.StartLine - 1, count)],
+                                [new IndexedLogReadRange(request.Anchor == "end" ? -1 : request.StartLine - 1 + request.Offset, count, request.Anchor == "end" ? request.Offset : null)],
                                 token).ConfigureAwait(false);
                             var lines = await ReadSnapshotAsync(
                                 lease,
@@ -692,7 +694,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             errors.Add(Error("target_limit_exceeded", $"No more than {_limits.MaximumTargets} targets may be requested."));
         if (request.Query == null || string.IsNullOrEmpty(request.Query) && string.IsNullOrWhiteSpace(request.StartTimestamp) &&
             string.IsNullOrWhiteSpace(request.EndTimestamp) && string.IsNullOrWhiteSpace(request.RelativeWindow))
-            errors.Add(Error("query_required", "A non-empty search query is required."));
+            errors.Add(Error("query_required", "Supply nonempty query text or startTimestamp, endTimestamp, or relativeWindow for time-only selection."));
         else if (request.Query.Length > _limits.MaximumQueryCharacters)
             errors.Add(Error("query_too_long", $"The query cannot exceed {_limits.MaximumQueryCharacters} characters."));
         if (request.ResultMode is not ("samples" or "matchesOnly" or "countsOnly"))

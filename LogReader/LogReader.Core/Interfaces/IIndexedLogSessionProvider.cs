@@ -34,7 +34,7 @@ public interface IIndexedLogSessionLease : IDisposable
         CancellationToken ct = default);
 }
 
-public sealed record IndexedLogReadRange(int StartLine, int Count);
+public sealed record IndexedLogReadRange(int StartLine, int Count, int? EndOffset = null);
 
 public sealed record IndexedLogLineBounds(int LineNumber, long StartOffset, long EndOffset);
 
@@ -85,17 +85,18 @@ public sealed class IndexedLogReadSnapshot
         foreach (var range in ranges)
         {
             ArgumentNullException.ThrowIfNull(range);
-            if (range.StartLine < 0)
+            if (range.StartLine < 0 && range.EndOffset == null || range.EndOffset < 0)
                 throw new ArgumentOutOfRangeException(nameof(ranges));
             if (range.Count < 0)
                 throw new ArgumentOutOfRangeException(nameof(ranges));
-            if (range.Count == 0 || range.StartLine >= index.LineCount)
+            var endExclusive = range.EndOffset is { } skip
+                ? Math.Max(0, index.LineCount - skip)
+                : (int)Math.Min(index.LineCount, Math.Min(int.MaxValue, (long)range.StartLine + range.Count));
+            var startLine = range.EndOffset != null ? Math.Max(0, endExclusive - range.Count) : range.StartLine;
+            if (range.Count == 0 || startLine >= index.LineCount)
                 continue;
 
-            var endExclusive = (int)Math.Min(
-                index.LineCount,
-                Math.Min(int.MaxValue, (long)range.StartLine + range.Count));
-            for (var lineNumber = range.StartLine; lineNumber < endExclusive; lineNumber++)
+            for (var lineNumber = startLine; lineNumber < endExclusive; lineNumber++)
             {
                 if (selected.ContainsKey(lineNumber))
                     continue;

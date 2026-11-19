@@ -94,7 +94,7 @@ public sealed partial class McpLogToolsTests
         await using var server = McpServer.Create(serverTransport, new McpServerOptions
         {
             ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
-            ToolCollection = McpLogTools.CreateToolCollection(backend)
+            ToolCollection = CreateBackendProjectionTools(backend)
         });
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var serverTask = server.RunAsync(cancellation.Token);
@@ -446,7 +446,7 @@ public sealed partial class McpLogToolsTests
         await using var server = McpServer.Create(serverTransport, new McpServerOptions
         {
             ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
-            ToolCollection = McpLogTools.CreateToolCollection(backend)
+            ToolCollection = CreateBackendProjectionTools(backend)
         });
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var serverTask = server.RunAsync(cancellation.Token);
@@ -525,7 +525,7 @@ public sealed partial class McpLogToolsTests
     {
         using var backend = new RecordingBackend();
 
-        var tools = McpLogTools.CreateToolCollection(backend).ToArray();
+        var tools = CreateBackendProjectionTools(backend).ToArray();
 
         Assert.Equal(
             ["count_logs", "list_log_tree", "monitor_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
@@ -551,7 +551,7 @@ public sealed partial class McpLogToolsTests
     public void CountToolSchema_ExposesTypedTargetsWindowsAndAggregateOutput()
     {
         using var backend = new RecordingBackend();
-        var countTool = McpLogTools.CreateToolCollection(backend)["count_logs"].ProtocolTool;
+        var countTool = CreateBackendProjectionTools(backend)["count_logs"].ProtocolTool;
         var schemaText = countTool.InputSchema.ToString();
         var outputSchemaText = countTool.OutputSchema!.Value.ToString();
 
@@ -577,7 +577,7 @@ public sealed partial class McpLogToolsTests
     public void SearchToolSchema_UsesTypedStringTargetKindsAndOmitsCancellationToken()
     {
         using var backend = new RecordingBackend();
-        var searchTool = McpLogTools.CreateToolCollection(backend)["search_logs"].ProtocolTool;
+        var searchTool = CreateBackendProjectionTools(backend)["search_logs"].ProtocolTool;
         var schema = searchTool.InputSchema;
         var schemaText = schema.ToString();
 
@@ -611,7 +611,7 @@ public sealed partial class McpLogToolsTests
         Assert.DoesNotContain("\"Folder\"", schemaText, StringComparison.Ordinal);
         Assert.Equal(
             schemaText,
-            McpLogTools.CreateToolCollection(backend)["search_logs"].ProtocolTool.InputSchema.ToString());
+            CreateBackendProjectionTools(backend)["search_logs"].ProtocolTool.InputSchema.ToString());
     }
 
     [Fact]
@@ -741,7 +741,7 @@ public sealed partial class McpLogToolsTests
         var options = new McpServerOptions
         {
             ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
-            ToolCollection = McpLogTools.CreateToolCollection(backend)
+            ToolCollection = CreateBackendProjectionTools(backend)
         };
         await using var server = McpServer.Create(serverTransport, options);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -815,7 +815,7 @@ public sealed partial class McpLogToolsTests
         var options = new McpServerOptions
         {
             ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
-            ToolCollection = McpLogTools.CreateToolCollection(backend)
+            ToolCollection = CreateBackendProjectionTools(backend)
         };
         await using var server = McpServer.Create(serverTransport, options);
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -864,7 +864,7 @@ public sealed partial class McpLogToolsTests
         var options = new McpServerOptions
         {
             ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
-            ToolCollection = McpLogTools.CreateToolCollection(backend)
+            ToolCollection = CreateBackendProjectionTools(backend)
         };
         await using var server = McpServer.Create(serverTransport, options);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -930,7 +930,7 @@ public sealed partial class McpLogToolsTests
         await using var server = McpServer.Create(serverTransport, new McpServerOptions
         {
             ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
-            ToolCollection = McpLogTools.CreateToolCollection(backend)
+            ToolCollection = CreateBackendProjectionTools(backend)
         });
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var serverTask = server.RunAsync(cancellation.Token);
@@ -1058,6 +1058,12 @@ public sealed partial class McpLogToolsTests
             LastCountRequest = request;
             return CountHandler?.Invoke(request, ct) ?? Task.FromResult(Envelope(CountResult) with { IsPartial = QueryIsPartial });
         }
+
+        public Task<LogOperationEnvelope<LogSearchResult>> ContinueLogSearchAsync(string cursor, int? timeoutMilliseconds = null, CancellationToken ct = default)
+            => SearchLogsAsync(new LogSearchQuery { Cursor = cursor }, ct);
+
+        public Task<LogOperationEnvelope<LogCountResult>> ContinueLogCountAsync(string cursor, int? timeoutMilliseconds = null, CancellationToken ct = default)
+            => CountLogsAsync(new LogCountQuery { Cursor = cursor }, ct);
 
         public Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(
             LogReadLinesQuery request,

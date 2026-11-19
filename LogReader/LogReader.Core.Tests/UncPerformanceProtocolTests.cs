@@ -8,16 +8,18 @@ public sealed class UncPerformanceProtocolTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ToolValidation_AcceptsEquivalentStructuredTextAndOptionalEmptyErrors(bool includeErrors)
+    public void ToolValidation_AcceptsEquivalentStructuredTextAndSuccessfulOutcomes(bool includeErrors)
     {
-        using var structured = JsonDocument.Parse(includeErrors ? "{\"result\":{\"count\":1},\"errors\":[]}" : "{\"result\":{\"count\":1}}");
+        using var structured = JsonDocument.Parse(includeErrors
+            ? "{\"schemaVersion\":5,\"status\":\"success\",\"data\":{\"count\":1},\"issues\":[]}"
+            : "{\"schemaVersion\":5,\"status\":\"partial\",\"data\":{\"count\":1},\"issues\":[{\"code\":\"file_error\"}]}");
         var response = JsonSerializer.SerializeToElement(new
         {
             content = new[] { new { type = "text", text = structured.RootElement.GetRawText() } },
             structuredContent = structured.RootElement
         });
         var validated = McpMeasurementClient.ValidateToolResponse(response);
-        Assert.Equal(1, validated.GetProperty("result").GetProperty("count").GetInt32());
+        Assert.Equal(1, validated.GetProperty("data").GetProperty("count").GetInt32());
     }
 
     [Theory]
@@ -29,7 +31,8 @@ public sealed class UncPerformanceProtocolTests
     {
         var envelope = JsonSerializer.SerializeToElement(new
         {
-            result = new { count = 1 }, errors = failure == "envelope-error" ? new[] { new { code = "fixture_error" } } : []
+            schemaVersion = 5, data = new { count = 1 }, status = failure == "envelope-error" ? "error" : "success",
+            issues = failure == "envelope-error" ? new[] { new { code = "fixture_error" } } : []
         });
         var text = new { type = "text", text = failure == "text-mismatch" ? "{\"result\":{\"count\":2},\"errors\":[]}" : envelope.GetRawText() };
         var response = JsonSerializer.SerializeToElement(new

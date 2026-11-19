@@ -185,8 +185,6 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
             else if (generation != state.Generation || length < state.ObservedLength ||
                      length == state.ObservedLength && write != state.ObservedWriteUtc)
                 throw new ScanFileException("log_generation_changed");
-            if (length != state.InitialLength || write != state.LastWriteUtc)
-                state.Reasons.Add(FileGrewDuringScan);
             state.ObservedLength = length;
             state.ObservedWriteUtc = write;
             stream.Position = state.ReadOffset;
@@ -205,8 +203,6 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
         var write = File.GetLastWriteTimeUtc(stream.SafeFileHandle);
         if (length < state.ObservedLength || length == state.ObservedLength && write != state.ObservedWriteUtc)
             throw new ScanFileException("log_generation_changed");
-        if (length != state.InitialLength || write != state.LastWriteUtc)
-            state.Reasons.Add(FileGrewDuringScan);
         state.ObservedLength = length;
         state.ObservedWriteUtc = write;
         if (!state.Generation.IsKnown)
