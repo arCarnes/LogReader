@@ -22,13 +22,39 @@ public sealed partial class HeadlessLogQueryBackend
         }
     }
 
+    public Task<LogOperationEnvelope<LogSearchResult>> ContinueLogSearchAsync(string cursor, int? timeoutMilliseconds = null, CancellationToken ct = default)
+        => ContinueQueryAsync<LogSearchResult>(cursor, false, timeoutMilliseconds, ct);
+
+    public Task<LogOperationEnvelope<LogCountResult>> ContinueLogCountAsync(string cursor, int? timeoutMilliseconds = null, CancellationToken ct = default)
+        => ContinueQueryAsync<LogCountResult>(cursor, true, timeoutMilliseconds, ct);
+
+    private async Task<LogOperationEnvelope<T>> ContinueQueryAsync<T>(string cursor, bool count, int? timeout, CancellationToken ct)
+    {
+        using var requestLease = BeginRequest();
+        var errors = ImmutableArray.CreateBuilder<ConfiguredLogRequestError>();
+        if (string.IsNullOrWhiteSpace(cursor))
+            errors.Add(Error("invalid_query_cursor", "A continuation cursor is required."));
+        ValidateTimeout(timeout, errors);
+        if (errors.Count > 0)
+            return Rejected<T>(CreateRequestId(), errors.ToImmutable());
+        return await RunResumableAsync<T>(new LogSearchQuery { Cursor = cursor, TimeoutMilliseconds = timeout },
+            count ? new LogCountQuery { Cursor = cursor, TimeoutMilliseconds = timeout } : null,
+            0, 0, 0, ct, resume: true).ConfigureAwait(false);
+    }
+
+    private static T RestoreQuery<T>(string json, string? cursor, int? timeout)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(json)!;
+        node["Cursor"] = cursor;
+        node["TimeoutMilliseconds"] = timeout;
+        return node.Deserialize<T>()!;
+    }
+
     private async Task<LogOperationEnvelope<T>> RunResumableAsync<T>(LogSearchQuery search,
-        LogCountQuery? count, int fileLimit, int hitsPerFile, int totalHits, CancellationToken callerToken)
+        LogCountQuery? count, int fileLimit, int hitsPerFile, int totalHits, CancellationToken callerToken, bool resume = false)
     {
         var requestId = CreateRequestId();
         var operation = count == null ? "search" : "count";
-        var textMode = count == null && search.ResultMode != "countsOnly";
-        var queryHitLimit = search.MaxQueryHits ?? _limits.MaximumQueryHits;
         var cursor = count?.Cursor ?? search.Cursor;
         var fingerprint = count == null
             ? CreateSearchRequestFingerprint(search, fileLimit, hitsPerFile, totalHits)
@@ -48,15 +74,29 @@ public sealed partial class HeadlessLogQueryBackend
             var catalog = await _catalogReader.ReadAsync(deadline.Token).ConfigureAwait(false);
             if (!catalog.IsSuccess)
                 return Failure<T>(requestId, catalog.Error!);
-            using var transaction = await Continuations.AcquireAsync(cursor, operation, fingerprint,
-                catalog.Snapshot!.Revision, deadline.Token).ConfigureAwait(false);
+            using var transaction = await (resume
+                ? Continuations.AcquireContinuationAsync(cursor!, operation, catalog.Snapshot!.Revision, deadline.Token)
+                : Continuations.AcquireAsync(cursor, operation, fingerprint, catalog.Snapshot!.Revision, deadline.Token)).ConfigureAwait(false);
             if (transaction.IsReplay)
                 return (LogOperationEnvelope<T>)transaction.ReplayResult!;
 
             var state = transaction.State is QueryTraversal previous ? previous.Clone() : new QueryTraversal
             {
-                ReferenceDate = _today(), DateOffsetDays = search.DateOffsetDays
+                ReferenceDate = _today(), DateOffsetDays = search.DateOffsetDays,
+                SearchJson = JsonSerializer.Serialize(search),
+                CountJson = count == null ? null : JsonSerializer.Serialize(count)
             };
+            if (resume)
+            {
+                search = RestoreQuery<LogSearchQuery>(state.SearchJson, cursor, search.TimeoutMilliseconds);
+                count = state.CountJson == null ? null : RestoreQuery<LogCountQuery>(state.CountJson, cursor, count?.TimeoutMilliseconds);
+                if (count == null)
+                    ValidateSearchRequest(search, out fileLimit, out hitsPerFile, out totalHits);
+                else
+                    fileLimit = _limits.MaximumFiles;
+            }
+            var textMode = count == null && search.ResultMode != "countsOnly";
+            var queryHitLimit = search.MaxQueryHits ?? _limits.MaximumQueryHits;
             if (state.CountTime == null)
             {
                 var now = _now();
@@ -288,7 +328,7 @@ public sealed partial class HeadlessLogQueryBackend
                             ? Error(scan.Code, "The configured file could not be continued safely.", targetId: file.File.FileId)
                             : ex is RegexMatchTimeoutException
                                 ? Error("regex_match_timeout", "The regular expression match timed out.", targetId: file.File.FileId)
-                                : Error("log_read_failed", "The configured log file could not be searched.", targetId: file.File.FileId);
+                                : ToFileError(ex, file.File.FileId);
                         file.Checkpoint.Reasons.Add(ex is ScanFileException changed && changed.Code.Contains("generation")
                             ? "file_generation_unverified" : "file_read_failed");
                         file.Done = true;
@@ -616,6 +656,8 @@ public sealed partial class HeadlessLogQueryBackend
 
     private sealed class QueryTraversal
     {
+        public string SearchJson = "";
+        public string? CountJson;
         public DateOnly ReferenceDate;
         public int DateOffsetDays;
         public SearchRequest? Predicate;
@@ -629,12 +671,13 @@ public sealed partial class HeadlessLogQueryBackend
         public List<TraversalFile> Files = [];
         public QueryTraversal Clone() => new()
         {
+            SearchJson = SearchJson, CountJson = CountJson,
             ReferenceDate = ReferenceDate, DateOffsetDays = DateOffsetDays, Predicate = Predicate, CountTime = CountTime, Resolver = Resolver,
             ResolverFinished = ResolverFinished, SelectedFiles = SelectedFiles, RemainingCandidates = RemainingCandidates,
             NextFileIndex = NextFileIndex, ReturnedHits = ReturnedHits,
             Files = Files.Select(static file => file.Clone()).ToList()
         };
-        public long RetainedBytes => 1024 + ((Predicate?.Query.Length ?? 0) + (Predicate?.ExcludeQuery?.Length ?? 0) +
+        public long RetainedBytes => 1024 + (SearchJson.Length + (CountJson?.Length ?? 0)) * 2L + ((Predicate?.Query.Length ?? 0) + (Predicate?.ExcludeQuery?.Length ?? 0) +
             (Predicate?.FromTimestamp?.Length ?? 0) + (Predicate?.ToTimestamp?.Length ?? 0)) * 2L + Files.Sum(static file => file.RetainedBytes) +
             (Resolver?.SeenPhysicalPathIdentities.Length ?? 0) * 128L;
     }

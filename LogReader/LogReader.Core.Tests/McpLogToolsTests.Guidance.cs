@@ -12,19 +12,12 @@ public sealed partial class McpLogToolsTests
         Assert.InRange(guidance.Length, 1, 512);
         Assert.Contains("configured IDs", guidance, StringComparison.Ordinal);
         Assert.Contains("count_logs for totals", guidance, StringComparison.Ordinal);
-        Assert.Contains("search_logs for examples", guidance, StringComparison.Ordinal);
-        Assert.Contains("replace cumulative", guidance, StringComparison.Ordinal);
-        Assert.Contains("Completeness flags", guidance, StringComparison.Ordinal);
+        Assert.Contains("continuation.tool", guidance, StringComparison.Ordinal);
+        Assert.Contains("status, issues", guidance, StringComparison.Ordinal);
+        Assert.Contains("later appends do not make results incomplete", guidance, StringComparison.Ordinal);
+        Assert.Contains("never restart", guidance, StringComparison.Ordinal);
+        Assert.Contains("explicit observation", guidance, StringComparison.Ordinal);
         Assert.Contains("untrusted", guidance, StringComparison.Ordinal);
-        Assert.Contains("MCP isError", guidance, StringComparison.Ordinal);
-        Assert.Contains("envelope.errors", guidance, StringComparison.Ordinal);
-        Assert.Contains("result presence", guidance, StringComparison.Ordinal);
-        Assert.Contains("nested file errors", guidance, StringComparison.Ordinal);
-        Assert.Contains("report observed results with caveats", guidance, StringComparison.Ordinal);
-        Assert.Contains("file_grew_during_scan", guidance, StringComparison.Ordinal);
-        Assert.Contains("not proven invalidation", guidance, StringComparison.Ordinal);
-        Assert.Contains("no extra tool calls solely to clear it", guidance, StringComparison.Ordinal);
-        Assert.Contains("monitor_logs only for explicit observation", guidance, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -33,7 +26,7 @@ public sealed partial class McpLogToolsTests
     public void SnapshotGuidance_ReportsGrowthWithoutStartingRepairOperations(string toolName)
     {
         using var backend = new RecordingBackend();
-        var tool = McpLogTools.CreateToolCollection(backend)[toolName].ProtocolTool;
+        var tool = CreateBackendProjectionTools(backend)[toolName].ProtocolTool;
         var result = tool.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
         var reasons = result.GetProperty("incompleteReasons").GetProperty("description").GetString();
         Assert.Contains("extent is frozen when first opened", tool.Description, StringComparison.Ordinal);
@@ -63,7 +56,7 @@ public sealed partial class McpLogToolsTests
     public void ReadAndObservationGuidance_TreatsGrowthAsExpectedWithoutRepairScans()
     {
         using var backend = new RecordingBackend();
-        var tools = McpLogTools.CreateToolCollection(backend);
+        var tools = CreateBackendProjectionTools(backend);
         var read = tools["read_log_lines"].ProtocolTool;
         Assert.Contains("needs no refresh solely because the file later grows", read.Description, StringComparison.Ordinal);
         var readResult = read.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
@@ -84,7 +77,7 @@ public sealed partial class McpLogToolsTests
     public void TreeGuidance_PrefersShallowDiscoveryAndPreservesScopeAndDepthFlexibility()
     {
         using var backend = new RecordingBackend();
-        var tool = McpLogTools.CreateToolCollection(backend)["list_log_tree"].ProtocolTool;
+        var tool = CreateBackendProjectionTools(backend)["list_log_tree"].ProtocolTool;
         var guidance = tool.Description!;
         Assert.Contains("maxDepth=0 when the relevant branch is unknown", guidance, StringComparison.Ordinal);
         Assert.Contains("rootGroupId and a small maxDepth", guidance, StringComparison.Ordinal);
@@ -105,7 +98,7 @@ public sealed partial class McpLogToolsTests
     public void CursorGuidance_NamesMutableArgumentsAndRecoveryInBothDirections(string toolName, string boundArgument, string mutableArguments)
     {
         using var backend = new RecordingBackend();
-        var tool = McpLogTools.CreateToolCollection(backend)[toolName].ProtocolTool;
+        var tool = CreateBackendProjectionTools(backend)[toolName].ProtocolTool;
         var input = tool.InputSchema.GetProperty("properties").GetProperty("cursor").GetProperty("description").GetString();
         var output = tool.OutputSchema!.Value.GetProperty("properties").GetProperty("result")
             .GetProperty("properties").GetProperty("nextCursor").GetProperty("description").GetString();
@@ -122,7 +115,7 @@ public sealed partial class McpLogToolsTests
     public void OutputGuidance_DistinguishesCountsErrorsAndTailStateTransitions()
     {
         using var backend = new RecordingBackend();
-        var tools = McpLogTools.CreateToolCollection(backend);
+        var tools = CreateBackendProjectionTools(backend);
         var searchEnvelope = tools["search_logs"].ProtocolTool.OutputSchema!.Value.GetProperty("properties");
         Assert.Contains("rejected", Description(searchEnvelope, "result"), StringComparison.Ordinal);
         Assert.Contains("nested file errors", Description(searchEnvelope, "errors"), StringComparison.Ordinal);
@@ -151,7 +144,7 @@ public sealed partial class McpLogToolsTests
     public void InputSchemas_AdvertiseUniversalBoundsWithoutAssumingConfigurableMaximums()
     {
         using var backend = new RecordingBackend();
-        var tools = McpLogTools.CreateToolCollection(backend);
+        var tools = CreateBackendProjectionTools(backend);
         var tree = tools["list_log_tree"].ProtocolTool.InputSchema.GetProperty("properties");
         Assert.Equal(20, tree.GetProperty("maxDepth").GetProperty("maximum").GetInt32());
         Assert.Equal(500, tree.GetProperty("maxNodes").GetProperty("maximum").GetInt32());
@@ -182,7 +175,7 @@ public sealed partial class McpLogToolsTests
     public void TimestampGuidance_SeparatesFileSelectionAndLineFiltering(string toolName)
     {
         using var backend = new RecordingBackend();
-        var input = McpLogTools.CreateToolCollection(backend)[toolName].ProtocolTool.InputSchema.GetProperty("properties");
+        var input = CreateBackendProjectionTools(backend)[toolName].ProtocolTool.InputSchema.GetProperty("properties");
         Assert.Contains("yesterday", input.GetProperty("dateOffsetDays").GetProperty("description").GetString(), StringComparison.Ordinal);
         Assert.Contains("Independent", input.GetProperty("dateOffsetDays").GetProperty("description").GetString(), StringComparison.Ordinal);
         Assert.Contains("Missing/unrecognized", input.GetProperty("startTimestamp").GetProperty("description").GetString(), StringComparison.Ordinal);
@@ -199,7 +192,7 @@ public sealed partial class McpLogToolsTests
     public void DiscoveryReadAndStatusGuidance_DescribesRecoveryAndEffectiveDefaults()
     {
         using var backend = new RecordingBackend();
-        var tools = McpLogTools.CreateToolCollection(backend);
+        var tools = CreateBackendProjectionTools(backend);
         var tree = tools["list_log_tree"].ProtocolTool;
         var input = tree.InputSchema.GetProperty("properties");
         Assert.Contains("rootGroupId/maxDepth", Description(input, "startIndex"), StringComparison.Ordinal);
@@ -225,7 +218,7 @@ public sealed partial class McpLogToolsTests
     public void CountOutputGuidance_ContainsOnlyCountStopSemanticsAndRetainsStrictFormats()
     {
         using var backend = new RecordingBackend();
-        var tools = McpLogTools.CreateToolCollection(backend);
+        var tools = CreateBackendProjectionTools(backend);
         var count = tools["count_logs"].ProtocolTool.OutputSchema!.Value;
         Assert.DoesNotContain("query_hit_limit", count.GetRawText(), StringComparison.Ordinal);
         Assert.DoesNotContain("query hit cap", count.GetRawText(), StringComparison.Ordinal);
@@ -247,7 +240,7 @@ public sealed partial class McpLogToolsTests
     public void PresentationSchemas_ConstrainStringInputsWithoutChangingBinding(string toolName, string propertyName, string values)
     {
         using var backend = new RecordingBackend();
-        var tool = McpLogTools.CreateToolCollection(backend)[toolName].ProtocolTool;
+        var tool = CreateBackendProjectionTools(backend)[toolName].ProtocolTool;
         var property = tool.InputSchema.GetProperty("properties").GetProperty(propertyName);
         Assert.Equal("string", property.GetProperty("type").GetString());
         Assert.Equal(values.Split('|'), property.GetProperty("enum").EnumerateArray().Select(item => item.GetString()));
@@ -261,7 +254,7 @@ public sealed partial class McpLogToolsTests
     public void PresentationSchemas_ShareOneTypedProvenanceDefinitionAndVersionWireEnvelope(string toolName)
     {
         using var backend = new RecordingBackend();
-        var schema = McpLogTools.CreateToolCollection(backend)[toolName].ProtocolTool.OutputSchema!.Value;
+        var schema = CreateBackendProjectionTools(backend)[toolName].ProtocolTool.OutputSchema!.Value;
         Assert.Equal(4, schema.GetProperty("properties").GetProperty("schemaVersion").GetProperty("const").GetInt32());
         Assert.DoesNotContain(schema.GetProperty("required").EnumerateArray(), item => item.GetString() == "result");
         var definition = schema.GetProperty("$defs").GetProperty("provenance");
@@ -290,7 +283,7 @@ public sealed partial class McpLogToolsTests
     public void CountSchema_DescribesBothFormatsAndStrictTupleShapes()
     {
         using var backend = new RecordingBackend();
-        var schema = McpLogTools.CreateToolCollection(backend)["count_logs"].ProtocolTool.OutputSchema!.Value;
+        var schema = CreateBackendProjectionTools(backend)["count_logs"].ProtocolTool.OutputSchema!.Value;
         var result = schema.GetProperty("properties").GetProperty("result");
         Assert.Contains("bucketMode", result.GetProperty("required").EnumerateArray().Select(item => item.GetString()));
         var properties = result.GetProperty("properties");
@@ -312,7 +305,7 @@ public sealed partial class McpLogToolsTests
     public void OutputSchemas_DoNotRequireNullablePropertiesOmittedBySerialization()
     {
         using var backend = new RecordingBackend();
-        foreach (var tool in McpLogTools.CreateToolCollection(backend))
+        foreach (var tool in CreateBackendProjectionTools(backend))
             Visit(tool.ProtocolTool.OutputSchema!.Value);
         static void Visit(JsonElement node)
         {

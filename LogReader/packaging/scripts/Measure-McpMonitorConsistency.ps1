@@ -12,8 +12,10 @@ function Invoke-MonitorConsistencyMeasurement {
     $state = @{ requestId = 10000; cursor = $null; rows = [System.Collections.Generic.List[object]]::new() }
     function Invoke-MonitorSample([string]$Scenario, [object]$Arguments) {
         $state.requestId++
-        $sample = Invoke-ToolMeasurement $Process $state.requestId 'monitor_logs' $Arguments $Timeout
-        $result = $sample.Response.result.structuredContent.result
+        $tool = if ($Arguments.Contains('targets')) { 'start_log_monitor' } elseif ($Arguments.Contains('handoffCursor')) { 'start_log_monitor_from_snapshot' } elseif ($Arguments.release) { 'stop_log_monitor' } else { 'poll_log_monitor' }
+        if ($Arguments.Contains('release')) { $Arguments.Remove('release') }
+        $sample = Invoke-ToolMeasurement $Process $state.requestId $tool $Arguments $Timeout
+        $result = $sample.Response.result.structuredContent.data
         if ($null -eq $result) { throw "Monitor scenario $Scenario returned no result." }
         $state.rows.Add([ordered]@{
             scenario = $Scenario; milliseconds = $sample.Milliseconds
@@ -33,7 +35,7 @@ function Invoke-MonitorConsistencyMeasurement {
         for ($poll = 0; $poll -lt 100; $poll++) {
             $submitted = $state.cursor
             $sample = Invoke-MonitorSample $Scenario @{ cursor = $submitted; maxFiles = 10; timeoutMilliseconds = $Timeout }
-            $result = $sample.Response.result.structuredContent.result
+            $result = $sample.Response.result.structuredContent.data
             $checked += $result.checkedFileCount
             foreach ($file in $result.files) {
                 foreach ($event in $file.events) { $events.Add(@{ fileId = $file.fileId; generation = $file.generation; event = $event }) }
@@ -45,7 +47,7 @@ function Invoke-MonitorConsistencyMeasurement {
                     throw 'Monitor replay changed its committed batch.'
                 }
             }
-            $state.cursor = $result.nextCursor
+            $state.cursor = $sample.Response.result.structuredContent.continuation.cursor
             if ($result.isScopeChecked) {
                 if ($checked -ne $FileIds.Count) { throw 'A monitor round did not check every deduplicated file exactly once.' }
                 return @{ result = $result; events = $events.ToArray() }
@@ -63,11 +65,11 @@ function Invoke-MonitorConsistencyMeasurement {
             @{ kind = 'dashboard'; id = 'measurement-dashboard' }, @{ kind = 'logFile'; id = $FileIds[0] })
         query = 'monitor-needle'; excludeQuery = 'drop'; timeoutMilliseconds = $Timeout
     }
-    $initialResult = $initial.Response.result.structuredContent.result
+    $initialResult = $initial.Response.result.structuredContent.data
     if ($initialResult.selectedFileCount -ne $FileIds.Count -or @($initialResult.files.events | Where-Object { $null -ne $_ }).Count -ne 0) {
         throw 'Monitor initialization did not deduplicate configured routes or unexpectedly returned history.'
     }
-    $state.cursor = $initialResult.nextCursor
+    $state.cursor = $initial.Response.result.structuredContent.continuation.cursor
     $idle = Invoke-MonitorRound 'idle'
     if (-not $idle.result.isIdle) { throw 'A stable checked scope did not become idle.' }
 
@@ -96,7 +98,7 @@ function Invoke-MonitorConsistencyMeasurement {
         if (-not $mixed.result.isCaughtUp) { throw 'Bounded hot-file polls did not drain.' }
     }
     $released = Invoke-MonitorSample 'release' @{ cursor = $state.cursor; release = $true }
-    if ($released.Response.result.structuredContent.result.state -ne 'released') { throw 'Monitor release was not terminal.' }
+    if ($released.Response.result.structuredContent.data.state -ne 'released') { throw 'Monitor release was not terminal.' }
 
     # Freeze a real snapshot before a controlled append, finish that same investigation,
     # and explicitly transfer its verified append-drift boundary. Never restart it.
@@ -106,30 +108,30 @@ function Invoke-MonitorConsistencyMeasurement {
         enableHandoff = $true; maxTotalHits = 1; maxHitsPerFile = 1; timeoutMilliseconds = $Timeout
     }
     $source = Invoke-ToolMeasurement $Process 11000 'search_logs' $searchArguments $Timeout
-    $snapshot = $source.Response.result.structuredContent.result
-    if ([string]::IsNullOrEmpty($snapshot.nextCursor)) { throw 'Snapshot fixture did not establish a continuation before the append.' }
+    $snapshot = $source.Response.result.structuredContent.data
+    if ([string]::IsNullOrEmpty($source.Response.result.structuredContent.continuation.cursor)) { throw 'Snapshot fixture did not establish a continuation before the append.' }
     Add-MonitorLines "handoff-needle after frozen extent`n" 0
     $sourcePages = 1
-    while (-not [string]::IsNullOrEmpty($snapshot.nextCursor) -and $sourcePages -lt 20) {
-        $searchArguments.cursor = $snapshot.nextCursor
+    while (-not [string]::IsNullOrEmpty($source.Response.result.structuredContent.continuation.cursor) -and $sourcePages -lt 20) {
+        $continueArguments = @{ cursor = $source.Response.result.structuredContent.continuation.cursor; timeoutMilliseconds = $Timeout }
         $sourcePages++
-        $source = Invoke-ToolMeasurement $Process (11000 + $sourcePages) 'search_logs' $searchArguments $Timeout
-        $snapshot = $source.Response.result.structuredContent.result
+        $source = Invoke-ToolMeasurement $Process (11000 + $sourcePages) 'continue_log_search' $continueArguments $Timeout
+        $snapshot = $source.Response.result.structuredContent.data
     }
-    if ($snapshot.matchingLineCount -ne 2 -or -not $snapshot.isTraversalComplete -or $snapshot.isQueryComplete -or
-        $snapshot.incompleteReasons -notcontains 'file_grew_during_scan' -or [string]::IsNullOrEmpty($snapshot.handoffCursor)) {
-        throw "Snapshot extent/terminal uncertainty differed: matches=$($snapshot.matchingLineCount), traversal=$($snapshot.isTraversalComplete), exact=$($snapshot.isQueryComplete), reasons=$($snapshot.incompleteReasons -join ',')."
+    if ($snapshot.matchingLineCount -ne 2 -or -not $snapshot.isTraversalComplete -or -not $snapshot.scanComplete -or
+        $snapshot.incompleteReasons -contains 'file_grew_during_scan' -or [string]::IsNullOrEmpty($snapshot.handoffCursor)) {
+        throw "Snapshot extent/terminal uncertainty differed: matches=$($snapshot.matchingLineCount), traversal=$($snapshot.isTraversalComplete), exact=$($snapshot.scanComplete), reasons=$($snapshot.incompleteReasons -join ',')."
     }
     $handoff = Invoke-MonitorSample 'explicit_handoff' @{ handoffCursor = $snapshot.handoffCursor; timeoutMilliseconds = $Timeout }
-    $handoffResult = $handoff.Response.result.structuredContent.result
+    $handoffResult = $handoff.Response.result.structuredContent.data
     $handoffEvents = @($handoffResult.files.events | Where-Object { $null -ne $_ })
     if ($handoffEvents.Count -ne 1 -or $handoffEvents[0].text -ne 'handoff-needle after frozen extent') {
         throw 'Explicit handoff did not deliver exactly the post-snapshot append.'
     }
-    $null = Invoke-MonitorSample 'handoff_release' @{ cursor = $handoffResult.nextCursor; release = $true }
+    $null = Invoke-MonitorSample 'handoff_release' @{ cursor = $handoff.Response.result.structuredContent.continuation.cursor; release = $true }
     return [ordered]@{
         physicalFiles = $FileIds.Count; duplicateRoutesDeduplicated = $true; replayVerified = $true
-        hotQuietVerified = $hotQuietVerified; frozenExtentAndTerminalDriftVerified = $true
+        hotQuietVerified = $hotQuietVerified; frozenExtentAndCompletionVerified = $true
         explicitHandoffVerified = $true; sourcePages = $sourcePages; rows = $state.rows.ToArray()
         unc = $(if ($UsesUnc) { 'Real UNC synthetic fixture under the supplied test root; parent/sibling directories were not enumerated.' } else { 'Local fixture; real UNC evidence is recorded in separate supplied-root runs.' })
     }

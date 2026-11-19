@@ -29,7 +29,6 @@ public sealed partial class HeadlessLogQueryBackendTests
         JsonElement result = default;
         string? terminalInput = null;
         var returnedHits = 0;
-        var reportedPageGrowth = false;
         for (var page = 0; cursor != null && page < 100; page++)
         {
             terminalInput = cursor;
@@ -39,8 +38,7 @@ public sealed partial class HeadlessLogQueryBackendTests
                 returnedHits += result.GetProperty("returnedHitCount").GetInt32();
                 if (result.GetProperty("files").GetArrayLength() > 0)
                 {
-                    Assert.Contains("file_grew_during_scan", Reasons(result, "pageIncompleteReasons"));
-                    reportedPageGrowth = true;
+                    Assert.DoesNotContain("file_grew_during_scan", Reasons(result, "pageIncompleteReasons"));
                 }
                 else
                     Assert.False(result.TryGetProperty("pageIncompleteReasons", out _));
@@ -49,19 +47,18 @@ public sealed partial class HeadlessLogQueryBackendTests
         }
         Assert.Null(cursor);
         Assert.True(result.GetProperty("isTraversalComplete").GetBoolean());
-        Assert.False(result.GetProperty(count ? "isComplete" : "isQueryComplete").GetBoolean());
+        Assert.True(result.GetProperty(count ? "isComplete" : "isQueryComplete").GetBoolean());
         Assert.Equal("scope_exhausted", result.GetProperty("stopReason").GetString());
         Assert.Equal(2, result.GetProperty("matchingLineCount").GetInt64());
         Assert.Equal(2, result.GetProperty("matchOccurrenceCount").GetInt64());
-        Assert.Equal("file_grew_during_scan", Assert.Single(Reasons(result, "incompleteReasons")));
+        Assert.Empty(Reasons(result, "incompleteReasons"));
         Assert.Equal(count ? 4 : 7, result.GetProperty("contractVersion").GetInt32());
         var file = Assert.Single(result.GetProperty("files").EnumerateArray());
-        Assert.False(file.GetProperty("isCountExact").GetBoolean());
+        Assert.True(file.GetProperty("isCountExact").GetBoolean());
         Assert.False(file.TryGetProperty("error", out _));
-        Assert.Equal("file_grew_during_scan", Assert.Single(Reasons(file, "incompleteReasons")));
+        Assert.Empty(Reasons(file, "incompleteReasons"));
         if (!count)
         {
-            Assert.True(reportedPageGrowth);
             Assert.Equal(operation == "countsOnly" ? 0 : 2, returnedHits);
         }
         if (operation == "count-hour")
@@ -127,6 +124,6 @@ public sealed partial class HeadlessLogQueryBackendTests
         }
 
         static IEnumerable<string?> Reasons(JsonElement value, string name)
-            => value.GetProperty(name).EnumerateArray().Select(reason => reason.GetString());
+            => value.TryGetProperty(name, out var reasons) ? reasons.EnumerateArray().Select(reason => reason.GetString()) : [];
     }
 }

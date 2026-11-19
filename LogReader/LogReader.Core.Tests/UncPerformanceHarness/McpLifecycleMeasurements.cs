@@ -53,7 +53,7 @@ internal static partial class McpWorkflowMeasurements
                 RejectFileErrors(snapshot.Result);
                 if (!snapshot.Result.GetProperty("isTraversalComplete").GetBoolean() ||
                     snapshot.Result.GetProperty("matchingLineCount").GetInt64() != 0 ||
-                    OptionalString(snapshot.Result, "nextCursor") != null)
+                    snapshot.Cursor != null)
                     throw new InvalidOperationException("Handoff source was not a complete frozen zero-match snapshot.");
                 var handoff = OptionalString(snapshot.Result, "handoffCursor")
                     ?? throw new InvalidOperationException("Handoff source did not retain a boundary.");
@@ -66,11 +66,11 @@ internal static partial class McpWorkflowMeasurements
             }
             else
             {
-                var initial = await client.CallAsync("monitor_logs", new
+                var initial = await client.CallAsync("start_log_monitor", new
                 {
                     targets, query = scenario == "unfinished" ? "^a(?:bc)?$" : (string?)null, useRegex = scenario == "unfinished"
                 }, ct);
-                cursor = OptionalString(initial.Result, "nextCursor");
+                cursor = initial.Cursor;
                 RejectIncompleteEnvelope(initial);
                 RejectFileErrors(initial.Result);
                 if (cursor == null || initial.Result.GetProperty("selectedFileCount").GetInt32() != files.Length ||
@@ -134,7 +134,7 @@ internal static partial class McpWorkflowMeasurements
                     else await File.WriteAllTextAsync(path, "new\n", encoding, ct);
                     await File.AppendAllTextAsync(files[1].Path, "healthy\n", ct);
                     await PollAsync(new { cursor }, [new("appended", 4, "healthy", 1)],
-                        error: scenario == "missing-reappear" ? "monitor_file_unavailable" :
+                        error: scenario == "missing-reappear" ? "log_not_found" :
                             scenario == "encoding" ? "log_encoding_changed" : "log_generation_changed");
                     if (scenario == "missing-reappear")
                     {
@@ -150,7 +150,7 @@ internal static partial class McpWorkflowMeasurements
             if (cursor != null)
             {
                 using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                var released = await client.CallAsync("monitor_logs", new { cursor, release = true }, cleanup.Token);
+                var released = await client.CallAsync("stop_log_monitor", new { cursor }, cleanup.Token);
                 releaseMilliseconds = released.Milliseconds;
                 if (released.Result.GetProperty("state").GetString() != "released")
                     throw new InvalidOperationException("Lifecycle observation release was not terminal.");
@@ -172,16 +172,16 @@ internal static partial class McpWorkflowMeasurements
         {
             var stage = "local-lifecycle/" + scenario + "/poll-" + (calls + 1);
             Stage = stage + "/call";
-            var response = await client.CallAsync("monitor_logs", arguments, ct);
+            var response = await client.CallAsync(JsonSerializer.SerializeToElement(arguments).TryGetProperty("handoffCursor", out _) ? "start_log_monitor_from_snapshot" : "poll_log_monitor", arguments, ct);
             // Update ownership before assertions so failure cleanup releases the committed cursor.
-            cursor = OptionalString(response.Result, "nextCursor");
+            cursor = response.Cursor;
             if (cursor == null) throw new InvalidOperationException("Lifecycle unexpectedly became terminal.");
             var result = response.Result;
             var batch = result.GetProperty("files").EnumerateArray().ToArray();
-            var hasPartial = response.Envelope.TryGetProperty("isPartial", out var partial) && partial.GetBoolean();
+            var hasPartial = response.Envelope.GetProperty("status").GetString() == "partial";
             Stage = stage + "/progress";
             if (hasPartial != (error != null) ||
-                response.Envelope.TryGetProperty("isTruncated", out var truncated) && truncated.GetBoolean() ||
+                response.Result.TryGetProperty("isTruncated", out var truncated) && truncated.GetBoolean() ||
                 batch.Length != files.Length || result.GetProperty("checkedFileCount").GetInt32() != files.Length ||
                 result.GetProperty("uncheckedFileCount").GetInt32() != 0 || !result.GetProperty("isScopeChecked").GetBoolean() ||
                 result.GetProperty("backlogFileCount").GetInt32() != backlog ||
@@ -195,13 +195,14 @@ internal static partial class McpWorkflowMeasurements
                 var file = batch[i];
                 if (file.GetProperty("fileId").GetString() != files[i].Id)
                     throw new InvalidOperationException("Lifecycle file order differed.");
-                var code = file.TryGetProperty("error", out var failure) && failure.ValueKind != JsonValueKind.Null
-                    ? failure.GetProperty("code").GetString() : null;
+                var fileIssues = response.Envelope.GetProperty("issues").EnumerateArray().Where(issue =>
+                    issue.TryGetProperty("fileId", out var id) && id.GetString() == files[i].Id).ToArray();
+                var code = fileIssues.Length == 0 ? null : fileIssues[0].GetProperty("code").GetString();
                 if (code != (i == 0 ? error : null))
                     throw new InvalidOperationException("Lifecycle file error differed.");
                 if (error != null && i == 0)
                 {
-                    if (file.GetProperty("state").GetString() != (error == "monitor_file_unavailable" ? "unavailable" : "stopped"))
+                    if (file.GetProperty("state").GetString() != (error == "log_not_found" ? "unavailable" : "stopped"))
                         throw new InvalidOperationException("Lifecycle error continuity state differed.");
                 }
                 else
@@ -221,14 +222,14 @@ internal static partial class McpWorkflowMeasurements
             Stage = stage + "/events";
             if (!actual.SequenceEqual(expected)) throw new InvalidOperationException("Lifecycle exact events differed.");
             Stage = stage + "/stopped-count";
-            if (result.GetProperty("stoppedFileCount").GetInt32() != (error != null && error != "monitor_file_unavailable" ? 1 : 0))
+            if (result.GetProperty("stoppedFileCount").GetInt32() != (error != null && error != "log_not_found" ? 1 : 0))
                 throw new InvalidOperationException("Lifecycle stopped count differed.");
             // A cursor poll replays its committed transaction. A handoff without a monitor cursor
             // creates an independent observation each time, so it has no replay envelope.
             Stage = stage + "/replay";
             if (replay)
             {
-                var repeated = await client.CallAsync("monitor_logs", arguments, ct);
+                var repeated = await client.CallAsync(JsonSerializer.SerializeToElement(arguments).TryGetProperty("handoffCursor", out _) ? "start_log_monitor_from_snapshot" : "poll_log_monitor", arguments, ct);
                 if (repeated.Envelope.GetRawText() != response.Envelope.GetRawText())
                     throw new InvalidOperationException("Lifecycle replay differed.");
             }

@@ -6,7 +6,7 @@ Last updated: 2026-11-04
 
 ## Security posture
 
-WeezTail MCP is a local, read-only stdio process. It exposes six bounded tools, accepts configured IDs instead of arbitrary paths, does not control the UI, and does not open a network or named-pipe listener. The process runs with the Windows privileges of the MCP client that launches it.
+WeezTail MCP is a local, read-only stdio process. It exposes eleven bounded tools, accepts configured IDs instead of arbitrary paths, does not control the UI, and does not open a network or named-pipe listener. The process runs with the Windows privileges of the MCP client that launches it.
 
 The security goal is to let a trusted local client read bounded excerpts from the current saved dashboard membership without turning the WPF application into an agent worker. Log contents remain sensitive and untrusted.
 

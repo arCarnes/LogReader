@@ -285,6 +285,10 @@ public sealed record LogCountFileResult(
 
 public sealed class LogReadLinesQuery
 {
+    public string Anchor { get; init; } = "start";
+
+    public int Offset { get; init; }
+
     public string FileId { get; init; } = string.Empty;
 
     public int StartLine { get; init; } = 1;

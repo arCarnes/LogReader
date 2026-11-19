@@ -99,7 +99,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             Assert.Equal("needle", Assert.Single(SearchLines(matchedFile)).Text);
         Assert.Equal(resultMode == "countsOnly" ? null : "utf-8", matchedFile.Encoding);
         Assert.Equal(resultMode == "countsOnly" ? 0 : 1, result.ReturnedHitCount);
-        Assert.Equal("log_read_failed", result.Files[1].Error!.Code);
+        Assert.Equal("log_not_found", result.Files[1].Error!.Code);
         Assert.False(result.IsPageComplete);
     }
 
@@ -1353,7 +1353,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var json = JsonSerializer.Serialize(response);
 
         Assert.True(response.IsPartial);
-        Assert.Equal("log_read_failed", Assert.Single(response.Result!.Files).Error!.Code);
+        Assert.Equal("log_not_found", Assert.Single(response.Result!.Files).Error!.Code);
         Assert.False(response.Result.IsPageComplete);
         Assert.False(response.Result.IsPageComplete);
         Assert.Equal(1, response.Result.FailedFileCount);

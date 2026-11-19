@@ -28,18 +28,17 @@ public sealed partial class HeadlessLogQueryBackendTests
             _ => limits with { MaximumContinuationSessionBytes = 1 }
         };
         using var backend = CreateBackend(CreateSnapshot(("file", path)), limits: limits);
-        var tools = new McpLogTools(backend);
         async Task<CallToolResult> Run() => count
-            ? await tools.CountLogsAsync([new(ConfiguredLogTargetKind.LogFile, "file")], "needle")
-            : await tools.SearchLogsAsync([new(ConfiguredLogTargetKind.LogFile, "file")], "needle");
+            ? McpV2Response.Project(await backend.CountLogsAsync(new() { Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle" }), false)
+            : McpV2Response.Project(await backend.SearchLogsAsync(new() { Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle" }), false);
         if (reason == "session_limit_exceeded")
-            Assert.False((await Run()).StructuredContent!.Value.TryGetProperty("errors", out var errors) && errors.GetArrayLength() > 0);
+            Assert.False((await Run()).StructuredContent!.Value.TryGetProperty("issues", out var errors) && errors.GetArrayLength() > 0);
         var response = await Run();
         var envelope = response.StructuredContent!.Value;
-        var error = Assert.Single(envelope.GetProperty("errors").EnumerateArray());
+        var error = Assert.Single(envelope.GetProperty("issues").EnumerateArray());
         Assert.Equal("continuation_capacity_exceeded", error.GetProperty("code").GetString());
         Assert.Equal(reason, error.GetProperty("reason").GetString());
-        Assert.Equal(reason != "query_too_large", error.GetProperty("isRetryable").GetBoolean());
+        Assert.Equal(reason != "query_too_large" ? "retry_later" : "report_failure", error.GetProperty("recovery").GetString());
         Assert.Contains(reason switch
         {
             "session_limit_exceeded" => "Resume existing queries",
@@ -48,7 +47,7 @@ public sealed partial class HeadlessLogQueryBackendTests
         }, error.GetProperty("message").GetString());
         Assert.Equal(envelope.GetRawText(), Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
         var schema = McpLogTools.CreateToolCollection(backend)[count ? "count_logs" : "search_logs"].ProtocolTool.OutputSchema!.Value;
-        var errorSchema = schema.GetProperty("properties").GetProperty("errors").GetProperty("items");
+        var errorSchema = schema.GetProperty("properties").GetProperty("issues").GetProperty("items");
         Assert.True(errorSchema.GetProperty("properties").TryGetProperty("reason", out _));
         Assert.DoesNotContain("reason", errorSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
     }
@@ -929,7 +928,7 @@ public sealed partial class HeadlessLogQueryBackendTests
     }
 
     [Fact]
-    public async Task ResumableSearch_AppendIsExcludedAndMakesFinalCountsUnverified()
+    public async Task ResumableSearch_AppendIsExcludedAndCapturedScopeCompletes()
     {
         var path = await CreateFileAsync("append-resume.log", "needle\nneedle");
         using var backend = CreateBackend(CreateSnapshot(("file", path)),
@@ -951,9 +950,9 @@ public sealed partial class HeadlessLogQueryBackendTests
             cursor = result.NextCursor;
         } while (cursor != null);
         Assert.True(result.IsTraversalComplete);
-        Assert.False(result.IsQueryComplete);
+        Assert.True(result.IsQueryComplete);
         Assert.Equal(2, result.MatchingLineCount);
-        Assert.Equal("file_grew_during_scan", Assert.Single(result.IncompleteReasons));
+        Assert.Empty(result.IncompleteReasons);
         Assert.DoesNotContain("file_changed_during_search", result.IncompleteReasons);
     }
 

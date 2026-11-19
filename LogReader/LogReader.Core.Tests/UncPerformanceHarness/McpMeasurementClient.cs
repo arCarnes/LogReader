@@ -8,7 +8,9 @@ using System.Text.Json.Nodes;
 internal sealed record McpMeasurementResponse(JsonElement Envelope, double Milliseconds, int WireBytes,
     long WorkingSetBytes, long PrivateBytes)
 {
-    public JsonElement Result => Envelope.GetProperty("result");
+    public JsonElement Result => Envelope.GetProperty("data");
+    public string? Cursor => Envelope.TryGetProperty("continuation", out var next) && next.ValueKind == JsonValueKind.Object
+        ? next.GetProperty("cursor").GetString() : null;
 }
 
 // Sequential JSON-RPC client used only by the opt-in measurement process. The initialize
@@ -66,7 +68,9 @@ internal sealed class McpMeasurementClient : IAsyncDisposable
     public async Task<McpMeasurementResponse> CallAsync(string name, object arguments, CancellationToken ct)
     {
         var watch = Stopwatch.StartNew();
-        var wire = await RequestAsync("tools/call", new { name, arguments }, ct);
+        var node = JsonSerializer.SerializeToNode(arguments)!.AsObject();
+        foreach (var property in node.ToArray()) if (property.Value == null) node.Remove(property.Key);
+        var wire = await RequestAsync("tools/call", new { name, arguments = node }, ct);
         var envelope = ValidateToolResponse(wire.GetProperty("result"));
         var elapsed = watch.Elapsed.TotalMilliseconds;
         _process.Refresh();
@@ -84,8 +88,8 @@ internal sealed class McpMeasurementClient : IAsyncDisposable
         if (texts.Length != 1 || !JsonNode.DeepEquals(JsonNode.Parse(texts[0].GetProperty("text").GetString()!),
                 JsonNode.Parse(structured.GetRawText())))
             throw new InvalidOperationException("MCP structured/text parity failed.");
-        if (structured.TryGetProperty("errors", out var errors) && errors.GetArrayLength() != 0)
-            throw new InvalidOperationException("Measurement envelope contains errors.");
+        if (structured.GetProperty("schemaVersion").GetInt32() != 5 || structured.GetProperty("status").GetString() == "error")
+            throw new InvalidOperationException("Measurement envelope contains a terminal error.");
         return structured.Clone();
     }
 

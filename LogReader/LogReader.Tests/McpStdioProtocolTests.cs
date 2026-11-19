@@ -32,7 +32,7 @@ public sealed class McpStdioProtocolTests
                 {
                     ["targets"] = new[] { new { kind = "logFile", id = "missing-file" } },
                     ["query"] = "needle",
-                    ["resultMode"] = "countsOnly"
+                    ["includeStatistics"] = false
                 },
                 cancellationToken: cancellation.Token);
             var count = await client.CallToolAsync(
@@ -47,11 +47,7 @@ public sealed class McpStdioProtocolTests
                 "read_log_lines",
                 new Dictionary<string, object?> { ["fileId"] = "missing-file" },
                 cancellationToken: cancellation.Token);
-            var tail = await client.CallToolAsync(
-                "read_log_tail",
-                new Dictionary<string, object?> { ["fileId"] = "missing-file" },
-                cancellationToken: cancellation.Token);
-            var monitor = await client.CallToolAsync("monitor_logs",
+            var monitor = await client.CallToolAsync("start_log_monitor",
                 new Dictionary<string, object?> { ["targets"] = new[] { new { kind = "logFile", id = "missing-file" } } },
                 cancellationToken: cancellation.Token);
             var status = await client.CallToolAsync("server_status", arguments: null, cancellationToken: cancellation.Token);
@@ -64,30 +60,26 @@ public sealed class McpStdioProtocolTests
             Assert.Null(client.ServerCapabilities.Resources);
             Assert.Null(client.ServerCapabilities.Prompts);
             Assert.Equal(
-                ["count_logs", "list_log_tree", "monitor_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
+                ["continue_log_count", "continue_log_search", "count_logs", "list_log_tree", "poll_log_monitor", "read_log_lines", "search_logs", "server_status", "start_log_monitor", "start_log_monitor_from_snapshot", "stop_log_monitor"],
                 tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
             AssertStructuredSuccess(status);
             AssertStructuredSuccess(list);
             var discovery = list.StructuredContent!.Value;
-            Assert.Empty(discovery.GetProperty("errors").EnumerateArray());
-            var tree = discovery.GetProperty("result");
-            Assert.Empty(tree.GetProperty("errors").EnumerateArray());
-            Assert.Equal(populatedCatalog ? new[] { "fixture-dashboard", "fixture-file" } : [],
+            Assert.Empty(discovery.GetProperty("issues").EnumerateArray());
+            var tree = discovery.GetProperty("data");
+            Assert.Equal(populatedCatalog ? new[] { "fixture-dashboard" } : [],
                 tree.GetProperty("nodes").EnumerateArray().Select(node => node.GetProperty("id").GetString()));
 
             Assert.True(rejectedList.IsError);
             var rejectedDiscovery = rejectedList.StructuredContent!.Value;
-            Assert.Equal("unknown_target", Assert.Single(rejectedDiscovery.GetProperty("errors").EnumerateArray()).GetProperty("code").GetString());
-            var rejectedTree = rejectedDiscovery.GetProperty("result");
-            Assert.Empty(rejectedTree.GetProperty("nodes").EnumerateArray());
-            Assert.Equal("unknown_target", Assert.Single(rejectedTree.GetProperty("errors").EnumerateArray()).GetProperty("code").GetString());
-            Assert.Equal(tree.GetProperty("catalogRevision").GetString(), rejectedTree.GetProperty("catalogRevision").GetString());
+            Assert.Equal("unknown_target", Assert.Single(rejectedDiscovery.GetProperty("issues").EnumerateArray()).GetProperty("code").GetString());
+            Assert.Equal(JsonValueKind.Null, rejectedDiscovery.GetProperty("data").ValueKind);
 
-            Assert.All([search, count, read, tail, monitor], response =>
+            Assert.All([search, count, read, monitor], response =>
             {
                 Assert.True(response.IsError);
-                Assert.Equal("unknown_target", Assert.Single(response.StructuredContent!.Value.GetProperty("errors").EnumerateArray()).GetProperty("code").GetString());
-                Assert.False(response.StructuredContent.Value.TryGetProperty("result", out _));
+                Assert.Equal("unknown_target", Assert.Single(response.StructuredContent!.Value.GetProperty("issues").EnumerateArray()).GetProperty("code").GetString());
+                Assert.Equal(JsonValueKind.Null, response.StructuredContent.Value.GetProperty("data").ValueKind);
             });
             Assert.Empty(standardError);
         }
@@ -132,7 +124,7 @@ public sealed class McpStdioProtocolTests
     }
 
     [Fact]
-    public async Task Executable_UnknownToolAndMalformedArgumentsUseProtocolErrors()
+    public async Task Executable_UnknownToolUsesProtocolErrorAndInvalidArgumentsUseStructuredErrors()
     {
         await using var deployment = new Deployment();
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -168,10 +160,10 @@ public sealed class McpStdioProtocolTests
 
         Assert.True(malformed.IsError);
         Assert.True(integerEnum.IsError);
-        AssertStructuredSuccess(unknownArgument);
+        Assert.True(unknownArgument.IsError);
         Assert.True(overLimit.IsError);
         Assert.Contains(
-            overLimit.StructuredContent!.Value.GetProperty("errors").EnumerateArray(),
+            overLimit.StructuredContent!.Value.GetProperty("issues").EnumerateArray(),
             error => error.GetProperty("code").GetString() == "invalid_line_count");
         await Assert.ThrowsAnyAsync<McpException>(async () =>
             await client.CallToolAsync("unknown_tool", arguments: null, cancellationToken: cancellation.Token));
@@ -187,7 +179,8 @@ public sealed class McpStdioProtocolTests
         var offset = new FileInfo(path).Length;
         async Task<JsonElement> MonitorAsync(Dictionary<string, object?> arguments)
         {
-            var response = await client.CallToolAsync("monitor_logs", arguments, cancellationToken: cancellation.Token);
+            var name = arguments.Remove("release") ? "stop_log_monitor" : arguments.ContainsKey("targets") ? "start_log_monitor" : "poll_log_monitor";
+            var response = await client.CallToolAsync(name, arguments, cancellationToken: cancellation.Token);
             AssertStructuredSuccess(response);
             return response.StructuredContent!.Value;
         }
@@ -199,10 +192,10 @@ public sealed class McpStdioProtocolTests
 
         var initial = await MonitorAsync(new() { ["targets"] = new[] { new { kind = "logFile", id = "fixture-file" } } });
         await AppendAsync([0xC3]);
-        var request = new Dictionary<string, object?> { ["cursor"] = initial.GetProperty("result").GetProperty("nextCursor").GetString() };
+        var request = new Dictionary<string, object?> { ["cursor"] = initial.GetProperty("continuation").GetProperty("cursor").GetString() };
         var pending = await MonitorAsync(request);
         Assert.Equal(pending.GetRawText(), (await MonitorAsync(request)).GetRawText());
-        var result = pending.GetProperty("result");
+        var result = pending.GetProperty("data");
         Assert.Equal("observing", result.GetProperty("state").GetString());
         Assert.Equal(1, result.GetProperty("backlogFileCount").GetInt32());
         Assert.False(result.GetProperty("isCaughtUp").GetBoolean());
@@ -210,14 +203,15 @@ public sealed class McpStdioProtocolTests
         Assert.Equal(0, result.GetProperty("examinedLineCount").GetInt32());
         Assert.Empty(result.GetProperty("files")[0].GetProperty("events").EnumerateArray());
         await AppendAsync([0xA9, 10]);
-        var completed = (await MonitorAsync(new() { ["cursor"] = result.GetProperty("nextCursor").GetString() })).GetProperty("result");
+        var completedEnvelope = await MonitorAsync(new() { ["cursor"] = pending.GetProperty("continuation").GetProperty("cursor").GetString() });
+        var completed = completedEnvelope.GetProperty("data");
         var item = Assert.Single(completed.GetProperty("files")[0].GetProperty("events").EnumerateArray());
         Assert.Equal("appended", item.GetProperty("kind").GetString());
         Assert.Equal("é", item.GetProperty("text").GetString());
         Assert.Equal(offset, item.GetProperty("byteOffset").GetInt64());
         Assert.True(completed.GetProperty("isCaughtUp").GetBoolean());
-        var released = await MonitorAsync(new() { ["cursor"] = completed.GetProperty("nextCursor").GetString(), ["release"] = true });
-        Assert.Equal("released", released.GetProperty("result").GetProperty("state").GetString());
+        var released = await MonitorAsync(new() { ["cursor"] = completedEnvelope.GetProperty("continuation").GetProperty("cursor").GetString(), ["release"] = true });
+        Assert.Equal("released", released.GetProperty("data").GetProperty("state").GetString());
     }
 
     [Fact]
@@ -376,7 +370,7 @@ public sealed class McpStdioProtocolTests
     {
         Assert.NotEqual(true, result.IsError);
         Assert.NotNull(result.StructuredContent);
-        Assert.Equal(4, result.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(5, result.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
     }
 
     private sealed class Deployment : IAsyncDisposable

@@ -28,8 +28,11 @@ internal sealed class QueryContinuationStore : IDisposable
     public Task<Lease> AcquireSnapshotAsync(string cursor, string catalogRevision, CancellationToken ct)
         => AcquireCoreAsync(cursor, "", "", catalogRevision, ct, export: true);
 
+    public Task<Lease> AcquireContinuationAsync(string cursor, string operation, string catalogRevision, CancellationToken ct)
+        => AcquireCoreAsync(cursor, operation, "", catalogRevision, ct, export: false, resume: true);
+
     private async Task<Lease> AcquireCoreAsync(string? cursor, string operation, string fingerprint,
-        string catalogRevision, CancellationToken ct, bool export)
+        string catalogRevision, CancellationToken ct, bool export, bool resume = false)
     {
         var token = cursor == null ? null : Decode(cursor);
         Session session;
@@ -61,7 +64,7 @@ internal sealed class QueryContinuationStore : IDisposable
                     throw new ContinuationException("expired_query_cursor");
                 if (session.CatalogRevision != catalogRevision)
                     throw new ContinuationException("stale_query_cursor");
-                if (!export && session.Fingerprint != fingerprint)
+                if (!export && !resume && session.Fingerprint != fingerprint)
                     throw new ContinuationException("mismatched_query_cursor");
             }
             session.Users++;

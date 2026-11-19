@@ -61,7 +61,7 @@ public sealed partial class HeadlessLogQueryBackend
             errors.Add(Error("target_limit_exceeded", $"No more than {_limits.MaximumTargets} targets may be requested."));
         if (request.Query == null || string.IsNullOrEmpty(request.Query) && string.IsNullOrWhiteSpace(request.StartTimestamp) &&
             string.IsNullOrWhiteSpace(request.EndTimestamp) && string.IsNullOrWhiteSpace(request.RelativeWindow))
-            errors.Add(Error("query_required", "A non-empty count query is required."));
+            errors.Add(Error("query_required", "Supply nonempty query text or startTimestamp, endTimestamp, or relativeWindow for time-only selection."));
         else if (request.Query.Length > _limits.MaximumQueryCharacters)
             errors.Add(Error("query_too_long", $"The query cannot exceed {_limits.MaximumQueryCharacters} characters."));
         if (request.StartTimestamp is { Length: > ConfiguredLogLimits.DefaultMaxTimestampCharacters } ||

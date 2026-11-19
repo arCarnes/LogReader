@@ -91,105 +91,55 @@ try {
     Send-McpMessage $process '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
     $toolsResponse = Read-McpResponse $process 2 $TimeoutMilliseconds
     $toolNames = @($toolsResponse.result.tools | ForEach-Object { $_.name } | Sort-Object)
-    $expectedToolNames = @("count_logs", "list_log_tree", "monitor_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status")
-    if (($toolNames -join "|") -ne ($expectedToolNames -join "|")) {
-        throw "MCP tools/list did not return the expected tool surface."
+    $expectedToolNames = @('continue_log_count', 'continue_log_search', 'count_logs', 'list_log_tree',
+        'poll_log_monitor', 'read_log_lines', 'search_logs', 'server_status', 'start_log_monitor',
+        'start_log_monitor_from_snapshot', 'stop_log_monitor')
+    if (($toolNames -join '|') -ne ($expectedToolNames -join '|')) {
+        throw 'MCP tools/list did not return the eleven-tool cutover surface.'
     }
-    foreach ($tool in ($toolsResponse.result.tools | Where-Object { $_.name -in @("search_logs", "count_logs", "read_log_lines", "read_log_tail", "monitor_logs") })) {
-        if (($tool.inputSchema.properties.provenanceMode.enum -join '|') -ne 'shared|inline' -or
-            $tool.inputSchema.properties.provenanceMode.default -ne 'shared') {
-            throw "MCP $($tool.name) did not advertise shared/inline provenance."
-        }
-        if ($null -eq $tool.outputSchema.'$defs'.provenance) {
-            throw "MCP $($tool.name) did not advertise a typed shared provenance definition."
-        }
-    }
-    $countTool = $toolsResponse.result.tools | Where-Object { $_.name -eq "count_logs" }
-    if (($countTool.inputSchema.properties.bucketMode.enum -join '|') -ne 'sparse|dense' -or
-        $countTool.inputSchema.properties.bucketMode.default -ne 'sparse') {
-        throw "MCP count_logs did not advertise sparse/dense bucket presentation."
-    }
-
-    Send-McpMessage $process '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"server_status","arguments":{}}}'
-    $statusResponse = Read-McpResponse $process 3 $TimeoutMilliseconds
-    if ($statusResponse.result.isError -eq $true) {
-        throw "MCP server_status returned an error."
-    }
-
-    if ([int]$statusResponse.result.structuredContent.schemaVersion -ne 4) {
-        throw "MCP server_status returned an unexpected schema version."
-    }
-
-    if ($statusResponse.result.structuredContent.result.transport -ne "stdio") {
-        throw "MCP server_status returned an unexpected transport."
-    }
-
-    $limits = $statusResponse.result.structuredContent.result.queryBackend.limits
-    $expectedLimits = [ordered]@{
-        searchWorkMilliseconds = 5000
-        searchScanBytes = 268435456
-        maximumFiles = 200
-        maximumHitsPerFile = 200
-        maximumTotalHits = 2000
-        maximumQueryHits = 10000
-        maximumResponseCharacters = 800000
-        defaultTimeoutMilliseconds = 30000
-    }
-    foreach ($entry in $expectedLimits.GetEnumerator()) {
-        if ($limits.($entry.Key) -ne $entry.Value) {
-            throw "MCP server_status returned an unexpected $($entry.Key) limit."
+    foreach ($tool in $toolsResponse.result.tools) {
+        if ($tool.inputSchema.type -ne 'object' -or $tool.inputSchema.additionalProperties -ne $false -or
+            $null -ne $tool.inputSchema.anyOf -or $null -ne $tool.inputSchema.oneOf -or $null -ne $tool.inputSchema.allOf) {
+            throw "MCP $($tool.name) did not advertise a closed ordinary-object input schema."
         }
     }
-    $searchTool = $toolsResponse.result.tools | Where-Object { $_.name -eq "search_logs" }
-    if ($null -eq $searchTool.inputSchema.properties.maxQueryHits) {
-        throw "MCP search tool did not advertise the query-wide hit allowance."
+    foreach ($name in @('count_logs', 'search_logs', 'start_log_monitor')) {
+        $tool = $toolsResponse.result.tools | Where-Object { $_.name -eq $name }
+        if ($tool.inputSchema.required -notcontains 'targets' -or
+            $tool.inputSchema.properties.targets.items.required -notcontains 'kind' -or
+            $tool.inputSchema.properties.targets.items.required -notcontains 'id') {
+            throw "MCP $name lost its required configured selectors."
+        }
     }
-
-    Send-McpMessage $process '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"count_logs","arguments":{"targets":[{"kind":"logFile","id":"packaging-smoke-missing"}],"query":"needle"}}}'
-    $countResponse = Read-McpResponse $process 4 $TimeoutMilliseconds
-    if ($countResponse.result.isError -ne $true -or @($countResponse.result.structuredContent.errors).Count -eq 0) {
-        throw "MCP count_logs did not return a structured tool rejection for an unknown configured ID."
-    }
-    if ([int]$countResponse.result.structuredContent.schemaVersion -ne 4) {
-        throw "MCP count_logs returned an unexpected envelope schema version."
-    }
-    Send-McpMessage $process '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"monitor_logs","arguments":{"targets":[{"kind":"logFile","id":"packaging-smoke-missing"}]}}}'
-    $monitorResponse = Read-McpResponse $process 5 $TimeoutMilliseconds
-    if ($monitorResponse.result.isError -ne $true -or @($monitorResponse.result.structuredContent.errors).Count -eq 0) {
-        throw "MCP monitor_logs did not return a structured rejection for an unknown configured ID."
-    }
-    foreach ($sample in @(
-        @{ response = $statusResponse; tool = ($toolsResponse.result.tools | Where-Object { $_.name -eq 'server_status' }) },
-        @{ response = $countResponse; tool = $countTool },
-        @{ response = $monitorResponse; tool = ($toolsResponse.result.tools | Where-Object { $_.name -eq 'monitor_logs' }) }
-    )) {
-        $text = @($sample.response.result.content | Where-Object { $_.type -eq 'text' })[0].text
-        if (($text | ConvertFrom-Json | ConvertTo-Json -Depth 100 -Compress) -cne
-            ($sample.response.result.structuredContent | ConvertTo-Json -Depth 100 -Compress)) {
-            throw "MCP structured/text content differ."
+    $cases = @(
+        @{ name = 'server_status'; arguments = @{}; status = 'success' },
+        @{ name = 'count_logs'; arguments = @{ targets = @(@{ kind = 'logFile'; id = 'packaging-smoke-missing' }); query = 'needle' }; status = 'error' },
+        @{ name = 'start_log_monitor'; arguments = @{ targets = @(@{ kind = 'logFile'; id = 'packaging-smoke-missing' }) }; status = 'error' },
+        @{ name = 'count_logs'; arguments = @{ query = 'needle' }; status = 'error'; path = '/targets' },
+        @{ name = 'server_status'; arguments = @{ unexpected = $true }; status = 'error'; path = '/unexpected' }
+    )
+    $requestId = 3
+    foreach ($case in $cases) {
+        $message = @{ jsonrpc = '2.0'; id = $requestId; method = 'tools/call'; params = @{ name = $case.name; arguments = $case.arguments } }
+        Send-McpMessage $process ($message | ConvertTo-Json -Depth 20 -Compress)
+        $sample = Read-McpResponse $process $requestId $TimeoutMilliseconds
+        $body = $sample.result.structuredContent
+        if ($body.schemaVersion -ne 5 -or $body.status -ne $case.status -or
+            $sample.result.isError -ne ($case.status -eq 'error')) {
+            throw "MCP $($case.name) returned an inconsistent outcome."
+        }
+        if ($case.path -and $body.issues.argumentPath -notcontains $case.path) {
+            throw "MCP $($case.name) did not explain its invalid argument."
+        }
+        $text = @($sample.result.content | Where-Object { $_.type -eq 'text' })[0].text
+        if (($text | ConvertFrom-Json | ConvertTo-Json -Depth 100 -Compress) -cne ($body | ConvertTo-Json -Depth 100 -Compress)) {
+            throw 'MCP structured/text content differ.'
         }
         if ($null -ne (Get-Command Test-Json -ErrorAction SilentlyContinue)) {
-            if (-not (Test-Json -Json $text -Schema ($sample.tool.outputSchema | ConvertTo-Json -Depth 100 -Compress) -ErrorAction Stop)) {
-                throw "MCP output does not satisfy its advertised schema."
+            $tool = $toolsResponse.result.tools | Where-Object { $_.name -eq $case.name }
+            if (-not (Test-Json -Json $text -Schema ($tool.outputSchema | ConvertTo-Json -Depth 100 -Compress) -ErrorAction Stop)) {
+                throw 'MCP output does not satisfy its advertised schema.'
             }
-        }
-    }
-    $requestId = 6
-    foreach ($name in @('search_logs', 'count_logs', 'read_log_lines', 'read_log_tail', 'monitor_logs')) {
-        $arguments = @{ provenanceMode = 'smoke-invalid' }
-        if ($name -in @('search_logs', 'count_logs', 'monitor_logs')) {
-            $arguments.targets = @(@{ kind = 'logFile'; id = 'packaging-smoke-missing' })
-            $arguments.query = 'needle'
-        } else {
-            $arguments.fileId = 'packaging-smoke-missing'
-        }
-        $message = @{ jsonrpc = '2.0'; id = $requestId; method = 'tools/call'; params = @{ name = $name; arguments = $arguments } }
-        Send-McpMessage $process ($message | ConvertTo-Json -Depth 10 -Compress)
-        $invalid = Read-McpResponse $process $requestId $TimeoutMilliseconds
-        if ($invalid.result.isError -ne $true -or $null -eq $invalid.result.structuredContent -or
-            $invalid.result.structuredContent.errors[0].code -ne 'invalid_presentation_mode' -or
-            $invalid.result.structuredContent.errors[0].message -ne 'provenanceMode must be one of: shared, inline.') {
-            throw "MCP $name did not reject an invalid presentation mode safely."
         }
         $requestId++
     }

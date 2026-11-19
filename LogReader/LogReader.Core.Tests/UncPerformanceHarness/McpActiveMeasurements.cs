@@ -22,11 +22,11 @@ internal static partial class McpWorkflowMeasurements
         Sample? sample = null;
         try
         {
-            var initial = await client.CallAsync("monitor_logs", new
+            var initial = await client.CallAsync("start_log_monitor", new
             {
                 targets = new[] { new { kind = "dashboard", id = $"local-active-{files.Length}" } }, query = "needle"
             }, ct);
-            cursor = OptionalString(initial.Result, "nextCursor");
+            cursor = initial.Cursor;
             RejectIncompleteEnvelope(initial);
             RejectFileErrors(initial.Result);
             if (cursor == null || initial.Result.GetProperty("selectedFileCount").GetInt32() != files.Length)
@@ -37,14 +37,14 @@ internal static partial class McpWorkflowMeasurements
             var watch = Stopwatch.StartNew();
             while (true)
             {
-                var poll = await client.CallAsync("monitor_logs", new { cursor, maxFiles = 10, timeoutMilliseconds = 30000 }, ct);
+                var poll = await client.CallAsync("poll_log_monitor", new { cursor, maxFiles = 10, timeoutMilliseconds = 30000 }, ct);
                 calls++;
                 responseBytes += poll.WireBytes;
                 working = Math.Max(working, poll.WorkingSetBytes);
                 privateBytes = Math.Max(privateBytes, poll.PrivateBytes);
                 var result = poll.Result;
                 progress.Add(GetProgress(result));
-                cursor = OptionalString(result, "nextCursor");
+                cursor = poll.Cursor;
                 RejectIncompleteEnvelope(poll);
                 RejectFileErrors(result);
                 var batch = result.GetProperty("files").EnumerateArray().ToArray();
@@ -94,7 +94,7 @@ internal static partial class McpWorkflowMeasurements
         {
             if (cursor != null)
             {
-                var release = await client.CallAsync("monitor_logs", new { cursor, release = true }, ct);
+                var release = await client.CallAsync("stop_log_monitor", new { cursor }, ct);
                 if (release.Result.GetProperty("state").GetString() != "released")
                     throw new InvalidOperationException("Active monitor release was not terminal.");
                 if (sample != null) sample = sample with { ReleaseMilliseconds = release.Milliseconds };

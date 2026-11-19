@@ -128,7 +128,7 @@ internal static partial class McpWorkflowMeasurements
         var startupMilliseconds = await client.InitializeAsync(ct);
         var tools = await client.ListToolsAsync(ct);
         var toolNames = tools.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).Order().ToArray();
-        if (!toolNames.SequenceEqual(new[] { "count_logs", "list_log_tree", "monitor_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status" }))
+        if (!toolNames.SequenceEqual(new[] { "continue_log_count", "continue_log_search", "count_logs", "list_log_tree", "poll_log_monitor", "read_log_lines", "search_logs", "server_status", "start_log_monitor", "start_log_monitor_from_snapshot", "stop_log_monitor" }))
             throw new InvalidOperationException("MCP tool surface changed.");
         var status = await client.CallAsync("server_status", new { }, ct);
         var limits = status.Result.GetProperty("queryBackend").GetProperty("limits").Clone();
@@ -213,7 +213,7 @@ internal static partial class McpWorkflowMeasurements
                 responseBytes += response.WireBytes;
                 working = Math.Max(working, response.WorkingSetBytes);
                 privateBytes = Math.Max(privateBytes, response.PrivateBytes);
-                if (tool == "monitor_logs") progress.Add(GetProgress(response.Result));
+                if (tool == "poll_log_monitor") progress.Add(GetProgress(response.Result));
                 if (response.Result.TryGetProperty("statistics", out var stats))
                 {
                     hasStatistics = true;
@@ -238,8 +238,14 @@ internal static partial class McpWorkflowMeasurements
                         ["targets"] = Targets(), ["query"] = "needle", ["includeStatistics"] = true,
                         ["timeoutMilliseconds"] = 30000, ["cursor"] = cursor
                     };
-                    if (operation == "search-snapshot") arguments["resultMode"] = "matchesOnly";
-                    var response = await CallAsync(operation == "count" ? "count_logs" : "search_logs", arguments);
+                    var tool = operation == "count" ? "count_logs" : "search_logs";
+                    if (cursor != null)
+                    {
+                        tool = operation == "count" ? "continue_log_count" : "continue_log_search";
+                        arguments.Remove("targets"); arguments.Remove("query");
+                    }
+                    else arguments.Remove("cursor");
+                    var response = await CallAsync(tool, arguments);
                     result = response.Result;
                     RejectFileErrors(result);
                     if (operation == "search-snapshot")
@@ -250,10 +256,10 @@ internal static partial class McpWorkflowMeasurements
                                 if (!seen.Add(identity)) throw new InvalidOperationException("Snapshot returned duplicate hit identities.");
                                 identities.Add(identity);
                             }
-                    cursor = OptionalString(result, "nextCursor");
+                    cursor = response.Cursor;
                     if (calls > 1024) throw new InvalidOperationException("Snapshot did not converge.");
                 } while (cursor != null);
-                if (!result.GetProperty(operation == "count" ? "isComplete" : "isQueryComplete").GetBoolean() ||
+                if (!result.GetProperty("scanComplete").GetBoolean() ||
                     !result.GetProperty("isTraversalComplete").GetBoolean() || result.GetProperty("failedFileCount").GetInt32() != 0 ||
                     result.GetProperty("searchedFileCount").GetInt32() != scope.Files.Length ||
                     result.GetProperty("matchingLineCount").GetInt64() != reference.Sum(r => r.Matches) ||
@@ -269,7 +275,7 @@ internal static partial class McpWorkflowMeasurements
             {
                 for (var i = 0; i < scope.Files.Length; i++)
                 {
-                    var response = await CallAsync("read_log_lines", new { fileId = scope.Files[i].Label, startLine = 1, count = 100 });
+                    var response = await CallAsync("read_log_lines", new { fileId = scope.Files[i].Label, anchor = "start", offset = 0, count = 100 });
                     RejectIncompleteEnvelope(response);
                     RejectFileErrors(response.Result);
                     var lines = response.Result.GetProperty("file").GetProperty("lines").EnumerateArray().ToArray();
@@ -287,8 +293,8 @@ internal static partial class McpWorkflowMeasurements
                 string? cursor = null;
                 try
                 {
-                    var initial = await CallAsync("monitor_logs", new { targets = Targets(), query = "needle", timeoutMilliseconds = 30000 });
-                    cursor = OptionalString(initial.Result, "nextCursor");
+                    var initial = await CallAsync("start_log_monitor", new { targets = Targets(), query = "needle", timeoutMilliseconds = 30000 });
+                    cursor = initial.Cursor;
                     RejectIncompleteEnvelope(initial);
                     RejectFileErrors(initial.Result);
                     if (cursor == null || initial.Result.GetProperty("selectedFileCount").GetInt32() != scope.Files.Length ||
@@ -305,9 +311,9 @@ internal static partial class McpWorkflowMeasurements
                         while (true)
                         {
                             var submitted = cursor;
-                            var poll = await CallAsync("monitor_logs", new { cursor, maxFiles = 10, timeoutMilliseconds = 30000 });
+                            var poll = await CallAsync("poll_log_monitor", new { cursor, maxFiles = 10, timeoutMilliseconds = 30000 });
                             var result = poll.Result;
-                            cursor = OptionalString(result, "nextCursor");
+                            cursor = poll.Cursor;
                             RejectIncompleteEnvelope(poll);
                             RejectFileErrors(result);
                             var files = result.GetProperty("files").EnumerateArray().ToArray();
@@ -331,7 +337,7 @@ internal static partial class McpWorkflowMeasurements
                                 units = checkedFiles.Count;
                                 identities.AddRange(checkedFiles.Order(StringComparer.Ordinal));
                                 // Replay validation is outside timing and the forward-call counters.
-                                var replay = await client.CallAsync("monitor_logs", new { cursor = submitted, maxFiles = 10, timeoutMilliseconds = 30000 }, ct);
+                                var replay = await client.CallAsync("poll_log_monitor", new { cursor = submitted, maxFiles = 10, timeoutMilliseconds = 30000 }, ct);
                                 if (replay.Envelope.GetRawText() != poll.Envelope.GetRawText())
                                     throw new InvalidOperationException("Monitor replay changed the committed envelope.");
                                 break;
@@ -350,7 +356,7 @@ internal static partial class McpWorkflowMeasurements
                 {
                     if (cursor != null)
                     {
-                        var released = await client.CallAsync("monitor_logs", new { cursor, release = true }, ct);
+                        var released = await client.CallAsync("stop_log_monitor", new { cursor }, ct);
                         releaseMilliseconds = released.Milliseconds;
                         if (released.Result.GetProperty("state").GetString() != "released")
                             throw new InvalidOperationException("Monitor release was not terminal.");
@@ -375,8 +381,8 @@ internal static partial class McpWorkflowMeasurements
 
     private static void RejectIncompleteEnvelope(McpMeasurementResponse response)
     {
-        if (response.Envelope.TryGetProperty("isPartial", out var partial) && partial.GetBoolean() ||
-            response.Envelope.TryGetProperty("isTruncated", out var truncated) && truncated.GetBoolean())
+        if (response.Envelope.GetProperty("status").GetString() == "partial" ||
+            response.Result.TryGetProperty("isTruncated", out var truncated) && truncated.GetBoolean())
             throw new InvalidOperationException("Incomplete monitor/read work cannot count as a speedup.");
     }
 

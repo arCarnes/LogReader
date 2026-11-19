@@ -1,83 +1,33 @@
-# MCP Log Server Architecture Decision
+# WeezTail MCP architecture
 
-Status: Accepted for v1
-Date: 2026-08-05
+The 2.0 cutover exposes eleven tools and envelope version 5. The current public contract is documented in [McpLogServerGuide.md](McpLogServerGuide.md).
 
-## Context
+## Process and authorization boundary
 
-WeezTail provides a local, read-only MCP server that discovers and queries only logs represented in the saved dashboard tree. Keeping the MCP host inside the .NET 10 WPF executable would couple the desktop application's entry point, dependency graph, release artifact, and replacement lifecycle to agent clients even though MCP execution is headless and process-isolated.
+WeezTail.Mcp.exe is a WPF-free, read-only stdio executable. Each client launches a separate process with the launching account's filesystem access and selected saved storage. No UI broker, network listener or arbitrary-path request surface exists. Stdout carries only protocol frames; sanitized startup diagnostics go to stderr. Application, launchers and shared libraries ship together from the same version.
 
-Sharing private UI indexes was evaluated and removed from v1. Cross-process reuse required a named-pipe service, backend arbitration, separate UI/agent ownership, cancellation, and scheduling inside the user-facing process. The measured index-build savings did not justify that concurrency and lifecycle surface.
+## MCP boundary
 
-## Decision
+McpRequestContracts contains explicit wire DTOs and closed object input schemas. McpV2Tools registers only the eleven public operations. MIT-licensed JsonSchema.Net 7.3.4 validates the exact published schema before deserialization and backend invocation; domain validators enforce effective limits and cross-field/state rules. Unknown names, missing selectors, unsupported target kinds and explicit nulls are rejected with bounded actionable issues. Input schemas have no root combinators requiring client rewriting.
 
-- Official packages contain `WeezTail.exe` for the WPF application and `WeezTail.Mcp.exe` for the MCP stdio server. They are built, versioned, installed, and upgraded together.
-- `WeezTail.Mcp.exe` is always WPF-free and headless. It requires no mode argument and never starts, activates, connects to, or executes work inside the running UI.
-- `WeezTail.App` has no reference to `LogReader.Mcp` or the MCP SDK and uses the generated WPF entry point.
-- Each configured MCP client owns its process, persisted-catalog reader, concurrency gates, tail-cursor key, and bounded line-index cache.
-- The desktop MCP Server dialog persists continuation capacity settings. Each sidecar reads and validates these settings once at startup without migration or writes; running processes keep their limits until restart.
-- The MCP transport and executable boundary remains the `LogReader.Mcp` project using the pinned `ModelContextProtocol.Core` package and seven explicitly registered tools.
-- Stdout is reserved for protocol frames. Sanitized startup diagnostics use stderr.
-- V1 exposes no arbitrary paths, whole-log resources, mutation tools, network listener, shared daemon, or cross-account broker.
+McpV2Response projects Core evidence through the existing sparse-bucket/shared-provenance transformations into a dedicated version-5 envelope. It centralizes request/file issues, maps completion to scanComplete, and consistently sets status and MCP isError. Core envelope versions and internal projection regression fixtures are not public tool contracts. Old tail/presentation workflows remain internal test/backend mechanisms only, with no public tool aliases.
 
-## Catalog and authorization
+## Bounded scans and continuations
 
-- Every operation reads or revalidates one immutable snapshot of saved groups, files, and date-path patterns. The revision covers all authorization-relevant fields but never exposes physical paths.
-- Callers select typed folder, dashboard, or log-file IDs. Folders expand descendant dashboards; dashboards preserve saved file order; duplicate physical paths are scanned once.
-- A file remains selectable only while it belongs to a dashboard in the same snapshot. Invalid topology or request limits reject before log I/O.
-- Positive `dateOffsetDays` values expand saved patterns in configured order. The backend selects the first existing authorized candidate and falls back to the first candidate only when none exist, allowing the ordinary missing-file error.
-- Public contracts contain stable IDs, display names, provenance, revisions, limits, bounded text, and sanitized errors. Physical paths and storage roots never serialize.
-- MCP tool envelopes use wire schema version 4. Search result contract 7 emits noteworthy file records with compact hit coordinates and merged chronological excerpts; count result contract 4 retains its sparse matched/incomplete records. Search hit lines are admitted across a page before context. Context is selected in configured file order, balanced outward across hits within each file, and each physical line is read, budgeted, and serialized once even when windows overlap. Aggregate aliases are removed in favor of one returned-hit field and one completion field at each scope. The MCP serialization policy omits search/count statistics by default, limit tables, selected empty excerpt/reason/hit arrays, null errors, exact-file evaluation boundaries, counts-only search encodings, false excerpt-line truncation, and unneeded provenance totals; populated evidence and explicit completion/truncation flags are preserved. `includeStatistics=true` opts into existing current-page search / whole-call count instrumentation. One MCP response projector uses fixed serializer options and per-call transformation state to return equivalent structured/text JSON. All five log tools use explicit typed envelope schemas with shared provenance definitions, strict tuple shapes, dense/inline alternatives and enum-constrained string inputs. The backend and cursor fingerprints do not consume presentation modes or the statistics flag. No diagnostic history is retained. Server limits remain available through `server_status`. Version 2 previously removed the version 1 live-backend and shared-cache status fields because the dedicated sidecar is always headless and process-scoped.
+The headless backend captures each file's byte extent at first open. Growth outside it does not qualify completion or create a recovery task. Actual detected incompatible changes remain failures. This is bounded evaluation, not an atomic multi-file filesystem snapshot.
 
-## Target-based observation (2026-11-01)
+The process-owned continuation store retains original serialized query options and owns their memory accounting alongside traversal state and replay results. Cursor-only resume checks operation identity, current catalog authorization, expiry and revision under the existing session gate. A replay does not advance twice. Relative windows and selected rolling dates stay frozen. Expiry or lost continuity never silently starts a replacement investigation.
 
-`monitor_logs` is an additive headless operation. Search/count retain their existing per-file frozen extents and transactional engine. Shared configured resolution, matching, exclusion and time rules feed a separate caller-driven observation state; no WPF session, UI index or background observer is involved. The UI monitor-new-matches already stops on continuity changes and retains its dispatcher ownership; legacy single-file tail reset behavior remains compatible.
+Line reads capture bounded indexed offsets in one lease. Start-relative and end-relative ranges resolve against the same index snapshot; independent reads do not create observation state. Monitoring captures current ends or explicitly copied verified snapshot boundaries, then advances through fair bounded caller-driven polls. Each observer stays on its selected rolling date. Unsafe changes stop affected files instead of silently rebasing their history.
 
-Monitor selection resolves at most the configured candidate ceiling, merges normalized physical-path aliases/provenance across bounded resolver pages, and admits at most 100 retained file records (unresolved entries consume slots). Capture baselines only after complete selection admission. A start-now trailing-boundary probe reads at most 64 KiB/file; unsafe long unfinished boundaries stop that file. No full-file line index is built. Events use file/generation/byte-offset identity. Polls have 10 files by default, up to 100; a global line cap, 4 MiB scan ceiling, 256 KiB/file slice, cooperative work deadline and separate response/provenance budgets. Pending decoding/matching or observed growth prevents caught-up status. Fair round state persists through nonmatches and isolated failures.
+## Resource and security invariants
 
-The shared HMAC continuation store serializes clone/commit transactions and immediate-previous-cursor replay, reauthorizes catalog revision before advance/replay, reserves working memory, and enforces capacity/idle expiry. Release clears checkpoints and retains only a bounded replay tombstone, evictable on admission. Opt-in snapshot export retains terminal state for the idle lifetime, copies verified fully committed boundaries into a monitor, and never fills gaps by scanning. Source and observation own independent retained state; handoff temporarily needs both working reservations. A cursorless handoff creates an independent observation; only monitor cursor polling is replay-idempotent.
+Preserve topology-aware disk admission, heavy-request bounds, response/text/provenance limits, candidate caps, continuation count/memory/expiry bounds, and cache ownership. Shared tables reconstruct retained provenance without changing authorization. Sparse grids retain actual timestamp boundaries, including daylight-saving transitions. No exception detail, raw physical path or supplied value is added to protocol diagnostics.
 
-One selected reference date and resolved paths remain bound across midnight. Same-path changes stop new-monitor files; temporary unavailability retains the original boundary. Optional observation end time is terminal when detected by a poll. No cross-date selection, rollover following, shared rolling resolver consolidation, automatic rescan or automatic search-to-monitor escalation is implemented.
+## Verification
 
-## Read-only persistence
+Protocol tests assert the exact public tool set, argument rejection before backend work, output-schema validity and text/structured parity. Backend tests cover append-independent completion, retained query state, replay, concurrency, expiry, authorization, safe handoff and end-relative physical reads. Packaging smoke drives the published executable. Acceptance also requires fresh Claude Code and Codex sessions against isolated fixture logs, including continuously appending search input; client-reported schema conversion is not established by model narration alone.
 
-- `PersistedDashboardSnapshotReader` reads the saved stores directly and never invokes repositories that migrate, rewrite, recover, validate by writing, or create storage.
-- The non-interactive resolver uses the installed configuration and the launching Windows account's MSI storage-selection file. Missing setup returns `storage_not_configured`; legacy or corrupt stores require an ordinary UI launch for migration or recovery.
-- Snapshot reads detect concurrent replacement and retry within a small bound. Referential validation prevents inconsistent stores from authorizing files.
+Historical consistency and performance reports remain evidence for their recorded versions, not current schema specifications. See DeveloperGuide.md for build/test lanes and the separate InteractiveDesktop category.
 
-## Query engine and resource ownership
-
-- `HeadlessLogQueryBackend` implements tree listing, resumable search and counting/aggregation, indexed line reads, polling tail reads, and status.
-- `QueryContinuationStore` owns bounded search/count state and signs small process-scoped session/revision references. It serializes advancement and retains one prior reply for retries. The legacy `SearchCursorCodec` remains for alternative non-incremental search providers. Resolver continuation remains a pure Core contract and contains only a stable-file index plus truncated SHA-256 path identities for cross-page deduplication; no physical path is serialized.
-- Searches use bounded sequential I/O. Context is collected during scanning; line offsets are built only for explicit line/tail addressing; they are not a search index.
-- `count_logs` resumes the same authorized resolver and scanner in internal 200-file work units, retains cumulative counts/buckets and returns no log text. Search/count normally yield after 5 seconds or 256 MiB, with at most two active file checkpoints. Retained sessions expire after 15 minutes idle and are bounded to 16 sessions, 64 MiB/session and 256 MiB/process. Each file extent freezes on first open; append drift is conservative and replacement/edit/truncation terminates that file. Relative windows and date-pattern resolution share one captured server-local request instant.
-- Text search limits each response to 200 hits/file and 2,000 total hits, and each query to 10,000 emitted hits across continuations. The cloned traversal counter commits atomically with the page; cancellation rolls back and replay spends no additional allowance. A query-cap terminal reply is replayable but remains traversal-incomplete with no next cursor. Count-only modes are exempt. The 30-second request deadline and 800,000-character per-response content budget are independent of the scan slice.
-- `IndexedLogSessionCache` is keyed by normalized path and resolved encoding, retains at most four sessions for 30 seconds, and admits at most 2,000,000 mapped offsets across them.
-- Every process owns a unique cache subtree and lifetime lock. Startup cleanup removes legacy flat indexes and stale versioned owners without deleting another live process's mappings.
-- Indexed reads copy only bounded offsets, release the index operation gate before physical I/O, and revalidate generation afterward.
-- Per MCP process, disk admission allows eight operations globally, four per UNC host and share, two per local root, and one for unknown paths. Normalized case/extended-path aliases share capacity; multiple shares on one host share its four slots. Admission grants global/group capacity atomically in oldest-eligible order, and reclaims inactive groups. Mapped drives remain local roots; classification performs no network discovery. At most two heavy requests execute concurrently, with two-file search/count lookahead and sequential monitoring retained. Detached OS probes retain admission and backend lifetime until they actually return, including cancellation and late faults. File, hit, line, context, text, index, and deadline limits still apply.
-- Tail cursors are process-scoped HMAC values bound to configured file ID, protected path/generation identity, encoding, line offset, and observed size. Rotation, truncation, and unterminated-line growth are explicit.
-- Disposal cancels active requests and releases gates, leases, mappings, and owner resources after request leases unwind.
-
-## Compact MCP presentation
-
-- `McpResponseJsonPolicy` reports envelope v4 only at serialization; Core envelopes remain v3, search contract v7 and count contract v4. Existing metadata/statistics omissions remain in force.
-- Count defaults to sparse indexed `[bucketIndex, matchingLineCount, matchOccurrenceCount]` tuples. The projector derives a grid from actual dense boundaries, adding anchors whenever fixed-offset/duration progression differs in instant or UTC offset. Final exclusive boundaries are included when needed. Decoding uses the latest preceding anchor plus nominal steps, preserving DST and variable-length days without reproducing timezone rules. Missing tuples establish exact zeros only for complete results. Dense mode keeps backend bucket objects; unbucketed results have a mode-specific empty array and no grid.
-- Search/count/read/tail default to a per-response provenance table and ordered file references. Record equality covers all provenance fields with ordinal strings. Only metadata retained by existing backend budgets is projected; authorization and budget accounting are unchanged. Inline mode retains original arrays. Hidden tail files never populate a table.
-- Presentation choices are validated before backend invocation and excluded from Core queries, continuation fingerprints and tail filter binding. Cached backend results can be projected differently on replay; tables never survive a response. No mutable serializer or cross-call projection state is shared.
-- Initialization supplies at most 512 characters of shared investigation guidance. Tool descriptions retain specific cap/cursor caveats; `server_status` supplies effective limits. Schemas document omission, reconstruction and explicit alternative formats.
-- Measurement report v8 records both modes, logical buckets versus emitted tuples, retained versus emitted provenance, protocol/structured bytes and optional schema validation. Serialized-byte savings are separate from actual Claude Code/Codex token measurements.
-
-## Consequences
-
-- Normal WPF startup, dependency closure, and shutdown contain no MCP host, SDK, listener, IPC objects, agent leases, or scheduling hooks.
-- Agent work is isolated from UI memory and locks, but its disk or network traffic can still contend with interactive activity at the operating-system level.
-- Multiple MCP clients build independent bounded caches. A shared daemon should be considered only after measured multi-client usage justifies its lifecycle and security cost.
-- The launching Windows account must resolve WeezTail's saved storage configuration and have read access to configured logs. Cross-account deployment is deferred until company requirements are known.
-- Packaging must place the install configuration beside both executables and smoke-test the published sidecar before producing portable or MSI artifacts.
-
-## File growth and model recovery guidance
-
-Search contract 7 and count contract 4 emit `file_grew_during_scan` for growth beyond a file's initially captured extent. The earlier code was `file_changed_during_search`; it is no longer emitted. Growth excludes later bytes from the bounded scan and does not establish replacement, corruption, or invalidation of returned evidence. It also does not prove append-only writes or exact historical contents, so existing completeness and count-exactness flags remain conservative.
-
-Models should report observed results with this caveat, following an existing continuation only when needed for the original task. Growth alone does not authorize a new search, recount, read, discovery, status check, tail, or monitor. Newer data or ongoing observation must be independently required by the user's request. Explicit snapshot-to-monitor handoff still accepts the growth reason. Monitoring and tails treat normal growth and unfinished-line updates as expected observation; generation failures remain distinct. Successful bounded reads need no refresh solely because the file later grows.
+The JSON validator dependency notices are embedded in WeezTail.Mcp as McpDependencyNotices.txt so single-file packages retain them. Live-client acceptance may remain pending locally; a source version/tag does not publish or approve a release.
