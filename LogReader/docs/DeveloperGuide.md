@@ -1,6 +1,6 @@
 # WeezTail Developer Guide
 
-Last updated: 2026-10-15
+Last updated: 2026-11-19
 
 This guide is for contributors working on the main WeezTail product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -47,7 +47,7 @@ LogReader.Tests -> LogReader.App + LogReader.Mcp + LogReader.Infrastructure + Lo
 ## Prerequisites
 
 - Windows, because the app and UI tests target WPF
-- .NET 10 SDK selected by the repository-root `global.json` (10.0.402 or a later patch in that feature band; previews disabled)
+- .NET 10 SDK selected by the repository-root `global.json`, which specifies the minimum patch in its feature band and disables previews
 - Visual Studio 2026 (18.0 or later) for .NET 10 IDE development; the SDK CLI is sufficient for managed builds
 - WiX Toolset SDK packages restore through the `LogReader.Setup` project when building the MSI package
 - Visual Studio 2022 C++ x64 build tools and the Windows SDK for the statically linked native MSI custom actions
@@ -140,7 +140,6 @@ Parallel test execution note:
 - Version metadata is centralized in `Directory.Build.props`; the UI, MCP server, application libraries, launcher executables, shared launcher library and MSI all use it. Annotated release tags use `v<version>`.
 - Build launchers from the same source/version as the application. Preserve source SHA provenance in informational versions. Their maintenance ZIP ships with the application release.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
-- The current release line is `1.5.13`.
 
 ## Dashboard loading
 
@@ -154,9 +153,15 @@ Progress uses the captured file extent and is published at most every 150 ms, wi
 
 ## MCP consistency validation
 
-The additive `monitor_logs` tool coordinates up to 100 deduplicated configured file paths through one process-owned cursor. It builds no full-file indexes. See [MCP server guide](McpLogServerGuide.md) for shared predicates, timestamp coverage, scope rounds, replay, selected-date binding and explicit handoff. The existing UI monitor-new-matches stop policy is retained; legacy tail resets remain compatible.
+`read_log_lines` with `anchor: "end"` reads a bounded range of recent physical lines in one call. For observation over time, `start_log_monitor` captures the current ends of up to 100 deduplicated physical files without building full-file indexes. Use the latest returned cursor to poll with `poll_log_monitor` or release the observation with `stop_log_monitor`. `start_log_monitor_from_snapshot` can begin an explicitly requested observation from a verified handoff cursor. See the [MCP server guide](McpLogServerGuide.md) for predicates, replay and selected-date binding.
 
-Use `packaging/scripts/Measure-McpLogServer.ps1 -ExecutablePath <fresh local publish> -FileCount 1|10|100 -LinesPerFile 250 -IncludeStatistics -IncludeMonitorConsistency` under PowerShell 7. The switch adds aliases, monitor initialization/idle/nonmatch/match/replay/hot-file rounds, frozen-extent drift continuation, explicit handoff and release. Report version 9 records actual per-poll checked/unchecked/backlog files, scan bytes, response bytes, latency, memory, artifact hashes and schema checks. For an authorized existing network test directory, add `-LogDirectoryRoot <absolute test root>`. The harness inspects only that root and creates dedicated synthetic run children; it does not enumerate the root's parents or siblings, and retains the run folders. The helper is `Measure-McpMonitorConsistency.ps1`; it is loaded by the main harness. Both framework-dependent validation output and packaged single-file sidecars are supported. Cancellation transport liveness is measured without startup sleeps; it does not claim work admission. Deterministic gated tests prove rollback/drain, and clean stdin shutdown provides separate process drain evidence.
+Run the harness under PowerShell 7 against a fresh local publish. For the larger fixtures, repeat with `-FileCount 10` and `-FileCount 100`.
+
+```powershell
+.\packaging\scripts\Measure-McpLogServer.ps1 -ExecutablePath .\artifacts\publish\Portable\WeezTail.Mcp.exe -FileCount 1 -LinesPerFile 250 -IncludeStatistics -IncludeMonitorConsistency
+```
+
+`-IncludeMonitorConsistency` checks deduplication of configured paths, idle and matching polls, replay, fairness under sustained appends, completion of the original search extent after an append, explicit handoff, and release. Report schema version 10 records per-poll coverage and backlog, scan and response bytes, latency, memory, artifact hashes and schema checks. For an authorized existing network test directory, add `-LogDirectoryRoot <absolute test root>`. The harness creates and retains dedicated synthetic run directories inside that root. It accepts both framework-dependent builds and packaged single-file executables. The cancellation probe checks that the transport remains responsive. Gated tests cover cancellation, rollback and drain, and the smoke test checks clean process exit after stdin closes.
 
 Build before tests with `-p:UseSharedCompilation=false` when compiler-server startup is unavailable. Run focused monitor/lifecycle/handoff suites three times, then the full solution with `Category!=InteractiveDesktop`. Run `.github/scripts/Invoke-InteractiveDesktopTests.ps1` separately; unavailable access or zero tests must fail that lane. [Consistency performance evidence](McpToolConsistencyMeasurements.md) records actual local and real UNC runs at 1/10/100 files, separately from controlled UNC contention tests.
 
@@ -266,14 +271,16 @@ Project boundaries:
 
 - `LogReader.Core` owns SDK-independent configured-target, tree, request, result, error, status, limit, and cursor contracts.
 - `LogReader.Infrastructure` owns non-interactive storage resolution, immutable persisted snapshot reading, target authorization, bounded headless queries, and owner-scoped index caches.
-- `LogReader.Mcp` produces `WeezTail.Mcp.exe` and owns the official `ModelContextProtocol.Core` adapter, exact seven-tool registration, stdio lifecycle, and headless backend composition. It must remain free of App and WPF references.
+- `LogReader.Mcp` produces `WeezTail.Mcp.exe` and owns the `ModelContextProtocol.Core` adapter, eleven-tool registration, stdio lifecycle, and headless backend composition. It must remain free of App and WPF references.
 - `LogReader.App` uses the generated WPF entry point and has no MCP project or SDK dependency.
 
 Cache ownership is process-scoped. Every MCP process has a unique owner directory and lifetime lock; cleanup can remove a stale owner only after acquiring its lock. UI sessions remain independent and keep their existing behavior. Never map, delete, or infer ownership of another process's `idx_*.bin` files.
 
 Contract evolution rules:
 
-- Keep public request/result DTOs independent of MCP SDK attributes and types.
+- Keep Core request and result types independent of the MCP SDK. `McpRequestContracts.cs` defines the public wire DTOs and closed input schemas. `McpV2Tools.cs` registers those schemas and uses them to validate arguments before binding and backend invocation. Initial search and count require `targets`, with a `kind` and `id` for each selector.
+- `McpV2Response.cs` projects backend results into the version 5 envelope. Use `issues` for actionable details such as argument paths, and `continuation` for the next call. Set MCP `isError` only when `status` is `error`. Return identical JSON in text and structured content.
+- Preserve captured file extents across search and count continuations. Ordinary appends outside those extents leave `scanComplete` unchanged. Continue with the returned cursor and surface actual integrity or continuity failures.
 - Keep tool names, structured schemas, annotations, bounds, documentation, and tests synchronized.
 - Accept typed configured IDs only; re-resolve current persisted membership before every file operation or retry.
 - Preserve protocol-only stdout. Diagnostics must be sanitized and use stderr or the existing diagnostic path.
@@ -283,11 +290,14 @@ Focused MCP validation:
 
 ```powershell
 dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj --filter "FullyQualifiedName~Mcp|FullyQualifiedName~ConfiguredLog|FullyQualifiedName~HeadlessLog"
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Publish-Portable.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Test-McpStdioArtifact.ps1 -ExecutablePath .\artifacts\publish\Portable\WeezTail.Mcp.exe
+dotnet test LogReader.Tests\LogReader.Tests.csproj --filter "FullyQualifiedName~McpStdioProtocolTests"
+pwsh -NoProfile -File .\packaging\scripts\Publish-Portable.ps1
+pwsh -NoProfile -File .\packaging\scripts\Test-McpStdioArtifact.ps1 -ExecutablePath .\artifacts\publish\Portable\WeezTail.Mcp.exe
 ```
 
 Before release, also run the full solution build/tests and `packaging\Publish-All.ps1`. Record executable, portable zip, MSI, default-UI startup/idle, and representative headless request measurements. Active MCP client processes must be stopped before installer replacement testing.
+
+For an MCP contract cutover, test the packaged server in fresh Codex and Claude Code sessions after restarting the MCP connection and refreshing tool discovery. Verify that each client discovers a configured file ID, supplies `targets` to `count_logs`, and finishes a search on a continuously appending fixture using the returned continuation without starting a second search. Record this separately from the direct stdio smoke, which checks the server's published schema and responses. See [MCP 2.0 cutover validation](McpV2CutoverValidation.md) for the fixture scenario and acceptance status.
 
 ## Application and launcher release workflow
 

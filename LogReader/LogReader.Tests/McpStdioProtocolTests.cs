@@ -52,6 +52,7 @@ public sealed class McpStdioProtocolTests
                 cancellationToken: cancellation.Token);
             var status = await client.CallToolAsync("server_status", arguments: null, cancellationToken: cancellation.Token);
 
+            Assert.NotNull(client.ServerInfo);
             Assert.Equal("weeztail", client.ServerInfo.Name);
             Assert.NotNull(client.ServerInstructions);
             Assert.InRange(client.ServerInstructions.Length, 1, 512);
