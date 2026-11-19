@@ -28,7 +28,7 @@ Discovery uses root-relative depth. Explore relevant branches with rootGroupId a
 
 ## Search once, then answer
 
-Each file's byte extent is captured when that file is first opened. Search/count continuations finish that same bounded scope. Bytes appended later are outside the search. Ordinary appends do not create issues, make the response partial, or prevent scanComplete. A busy log is not a reason to repeat the search, inspect status, read again, or start monitoring.
+Each file's byte extent is captured when that file is first opened. Search/count continuations finish that same bounded scope. Bytes beyond the extent are excluded. If the server observes growth during the scan, it cannot verify that the original bytes were preserved. It reports a file_grew_during_scan issue, status=partial, and scanComplete=false while finishing the captured extent. Report the observed evidence with this caveat. Growth alone does not call for a new search, status check, read, or observation.
 
 Follow an existing continuation as needed to answer the user's question, then report the evidence. Search returns samples; use count_logs for totals. A deliberate sample cap may leave scanComplete=false with no continuation; report available samples without starting another investigation. Detected truncation, replacement, incompatible edits, read failures, or lost continuity are reported explicitly. The contract describes evaluation of captured extents rather than an atomic filesystem snapshot.
 
@@ -68,17 +68,17 @@ start_log_monitor captures current ends without scanning history. Targets can co
 
 A poll can return no matching events while other files remain unchecked or backlogged. Inspect isScopeChecked, isCaughtUp, backlogFileCount, uncheckedFileCount and issues. Apply events by file/generation/byteOffset: appended adds, updated replaces an unfinished line, removed deletes a previously matching unfinished line. Replays must be applied once. Ordinary growth is expected. Unsafe replacement, truncation or incompatible content changes stop affected files; report gaps without silently starting another observation.
 
-For an explicit search-to-observation handoff, set enableHandoff=true on the original search/count. Once its verified boundaries are fully evaluated, call start_log_monitor_from_snapshot with handoffCursor. It copies the frozen predicate/window; it never fills gaps by rescanning. Later appends do not by themselves disqualify a verified handoff.
+For an explicit search-to-observation handoff, set enableHandoff=true on the original search/count. When the completed snapshot returns handoffCursor, pass it to start_log_monitor_from_snapshot. It copies the frozen predicate and window. Growth observed during the scan prevents handoff. Observation from an eligible boundary can read subsequent appends.
 
 ## Interpret outcomes and recover
 
 Every response has schemaVersion=5, requestId, catalogRevision, status, data, issues, and continuation. Absent data/continuation are null; absent issues are an empty array. MCP text and structured content contain identical JSON.
 
-- success: the call accomplished its bounded work. Normal pagination, ordinary appends and genuine zero matches are successful.
-- partial: useful evidence exists alongside actual file failures or detected integrity problems.
+- success: the call accomplished its bounded work. Normal pagination and genuine zero matches are successful.
+- partial: available evidence is qualified by file failures or unverified contents.
 - error: arguments were rejected or the requested scope could not be evaluated. MCP isError is true exactly for this status. Do not interpret null data as zero matches.
 
-Issues are centralized in the envelope, with code, scope, message and recovery. Argument issues include argumentPath as a JSON Pointer such as /targets/0/kind. File issues include fileId. Capacity errors additionally identify their reason. No nested file-error search is necessary.
+Issues are centralized in the envelope, with code, scope, message and recovery. Argument issues include argumentPath as a JSON Pointer such as /targets/0/kind. File issues include fileId. Continuations report known issues across the scope, and file_issues_truncated gives the omitted count when details reach the response limit. Capacity errors additionally identify their reason. No nested file-error search is necessary.
 
 ```json
 {"code":"required_argument","scope":"argument","message":"Supply nonempty targets from list_log_tree, for example [{\"kind\":\"logFile\",\"id\":\"<discovered-id>\"}].","recovery":"correct_arguments","argumentPath":"/targets"}

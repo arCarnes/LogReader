@@ -50,7 +50,7 @@ internal static partial class McpWorkflowMeasurements
                 var snapshot = await client.CallAsync(scenario == "handoff-count" ? "count_logs" : "search_logs",
                     new { targets, query = "é", enableHandoff = true }, ct);
                 RejectIncompleteEnvelope(snapshot);
-                RejectFileErrors(snapshot.Result);
+                RejectFileErrors(snapshot);
                 if (!snapshot.Result.GetProperty("isTraversalComplete").GetBoolean() ||
                     snapshot.Result.GetProperty("matchingLineCount").GetInt64() != 0 ||
                     snapshot.Cursor != null)
@@ -72,7 +72,7 @@ internal static partial class McpWorkflowMeasurements
                 }, ct);
                 cursor = initial.Cursor;
                 RejectIncompleteEnvelope(initial);
-                RejectFileErrors(initial.Result);
+                RejectFileErrors(initial);
                 if (cursor == null || initial.Result.GetProperty("selectedFileCount").GetInt32() != files.Length ||
                     initial.Result.GetProperty("files").EnumerateArray().Any(file => file.GetProperty("events").GetArrayLength() != 0))
                     throw new InvalidOperationException("Lifecycle initialization did not establish safe baselines.");

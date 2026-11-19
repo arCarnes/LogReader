@@ -15,7 +15,7 @@ internal static class McpV2Tools
     {
         Converters = { new IntegralInt32Converter() }
     };
-    private const string Snapshot = "Each file's extent is captured when first opened. Later appends are outside this search and do not make it incomplete. Finish the existing continuation as needed, then answer. Never restart or start observation merely because a file grows.";
+    private const string Snapshot = "Each file's extent is captured when first opened. Bytes beyond it are excluded. Growth during the scan can make captured contents unverifiable. Finish the existing continuation and report the evidence with its caveats. Never restart or start observation merely because a file grows.";
 
     internal static McpServerPrimitiveCollection<McpServerTool> Create(ILogQueryBackend backend)
     {

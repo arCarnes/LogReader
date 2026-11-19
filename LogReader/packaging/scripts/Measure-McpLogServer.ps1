@@ -749,13 +749,8 @@ try {
                         tableIncluded = $null -ne $wireResult.provenanceTable
                     }
                 } else { $null })
-                errorCodes = @($_.Response.result.structuredContent.issues | ForEach-Object { $_.code })
-                fileErrorCodes = @($(
-                    @(
-                        $_.Response.result.structuredContent.data.files | ForEach-Object { $_.error.code }
-                        $_.Response.result.structuredContent.data.file | ForEach-Object { $_.error.code }
-                    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-                ))
+                errorCodes = @($_.Response.result.structuredContent.issues | Where-Object { $_.scope -ne 'file' } | ForEach-Object { $_.code })
+                fileErrorCodes = @($_.Response.result.structuredContent.issues | Where-Object { $_.scope -eq 'file' } | ForEach-Object { $_.code })
                 status = $(if ($_.Name -like "server_status*") {
                     $_.Response.result.structuredContent.data
                 } else {

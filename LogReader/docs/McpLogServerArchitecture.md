@@ -14,7 +14,7 @@ McpV2Response projects Core evidence through the existing sparse-bucket/shared-p
 
 ## Bounded scans and continuations
 
-The headless backend captures each file's byte extent at first open. Growth outside it does not qualify completion or create a recovery task. Actual detected incompatible changes remain failures. This is bounded evaluation, not an atomic multi-file filesystem snapshot.
+The headless backend captures each file's byte extent at first open. Observed growth makes captured bytes unverifiable because file identity and length cannot distinguish an append from a rewrite followed by growth. The scan can finish the captured extent and return partial evidence. Detected incompatible changes stop the affected file. Files are opened individually, so each extent corresponds to its own capture time.
 
 The process-owned continuation store retains original serialized query options and owns their memory accounting alongside traversal state and replay results. Cursor-only resume checks operation identity, current catalog authorization, expiry and revision under the existing session gate. A replay does not advance twice. Relative windows and selected rolling dates stay frozen. Expiry or lost continuity never silently starts a replacement investigation.
 
@@ -26,7 +26,7 @@ Preserve topology-aware disk admission, heavy-request bounds, response/text/prov
 
 ## Verification
 
-Protocol tests assert the exact public tool set, argument rejection before backend work, output-schema validity and text/structured parity. Backend tests cover append-independent completion, retained query state, replay, concurrency, expiry, authorization, safe handoff and end-relative physical reads. Packaging smoke drives the published executable. Acceptance also requires fresh Claude Code and Codex sessions against isolated fixture logs, including continuously appending search input; client-reported schema conversion is not established by model narration alone.
+Protocol tests assert the exact public tool set, argument rejection before backend work, output-schema validity and text/structured parity. Backend tests cover frozen-extent evidence after growth, retained query state, replay, concurrency, expiry, authorization, safe handoff and end-relative physical reads. Packaging smoke drives the published executable. Acceptance also requires fresh Claude Code and Codex sessions against isolated fixture logs, including continuously appending search input; client-reported schema conversion is not established by model narration alone.
 
 Historical consistency and performance reports remain evidence for their recorded versions, not current schema specifications. See DeveloperGuide.md for build/test lanes and the separate InteractiveDesktop category.
 

@@ -21,6 +21,8 @@ public sealed record ConfiguredLogRequestError(
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Reason { get; init; }
+
+    internal string? ArgumentPath { get; init; }
 }
 
 public sealed record ConfiguredLogFileError(

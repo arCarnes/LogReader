@@ -95,13 +95,13 @@ Start or restart Claude Code, then enter `/mcp` in a session to confirm that `we
 
 Ask the agent to use the saved hierarchy, for example: "Using WeezTail, search env1 > app1 > instance1 for ERROR and summarize the evidence."
 
-The agent discovers IDs with list_log_tree, explores relevant branches, and supplies nonempty typed targets to search_logs or count_logs. Search supplies examples; count supplies totals. Both capture each file's extent when opened. Later appends are outside that search and do not make it incomplete. The agent follows an existing continuation when needed, then answers; it must not repeatedly search or start observation merely because a file is active.
+The agent discovers IDs with list_log_tree, explores relevant branches, and supplies nonempty typed targets to search_logs or count_logs. Search supplies examples; count supplies totals. Both capture each file's extent when opened and exclude later bytes. If a file grows during the scan, the agent finishes the existing continuation and reports the evidence with the integrity caveat. Growth alone does not call for another search or an observation.
 
 Read the latest physical lines with read_log_lines using anchor=end and count. This also works for untimestamped stack traces. Time-window search instead selects events with recognizable timestamps. There is no separate tail tool.
 
 Observation requires an explicit request such as "Observe new ERROR lines for one minute, then stop and summarize." The agent uses start_log_monitor, poll_log_monitor and stop_log_monitor. Initial observation captures ends without historical scanning. An explicitly requested snapshot handoff uses enableHandoff followed by start_log_monitor_from_snapshot.
 
-Version 2.0 is a cutover: refresh discovery through a restarted server connection. The eleven-tool interface rejects unknown fields and explicit nulls. Search/count continuation tools accept only cursor, timeoutMilliseconds and includeStatistics. Responses use envelope version 5 with status, data, centralized issues and continuation. Check scanComplete for captured-scope completion; normal pagination and ordinary appends are successful.
+Version 2.0 is a cutover: refresh discovery through a restarted server connection. The eleven-tool interface rejects unknown fields and explicit nulls. Search/count continuation tools accept only cursor, timeoutMilliseconds and includeStatistics. Responses use envelope version 5 with status, data, centralized issues and continuation. Check scanComplete for verified captured-scope completion and issues for qualifications. Normal pagination is successful.
 
 See the [server guide](McpLogServerGuide.md) for exact operations, recovery semantics, examples and limits.
 

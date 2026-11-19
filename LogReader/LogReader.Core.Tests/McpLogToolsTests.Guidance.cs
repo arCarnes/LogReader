@@ -14,8 +14,8 @@ public sealed partial class McpLogToolsTests
         Assert.Contains("count_logs for totals", guidance, StringComparison.Ordinal);
         Assert.Contains("continuation.tool", guidance, StringComparison.Ordinal);
         Assert.Contains("status, issues", guidance, StringComparison.Ordinal);
-        Assert.Contains("later appends do not make results incomplete", guidance, StringComparison.Ordinal);
-        Assert.Contains("never restart", guidance, StringComparison.Ordinal);
+        Assert.Contains("Growth during a scan can make captured contents unverifiable", guidance, StringComparison.Ordinal);
+        Assert.Contains("Never restart", guidance, StringComparison.Ordinal);
         Assert.Contains("explicit observation", guidance, StringComparison.Ordinal);
         Assert.Contains("untrusted", guidance, StringComparison.Ordinal);
     }

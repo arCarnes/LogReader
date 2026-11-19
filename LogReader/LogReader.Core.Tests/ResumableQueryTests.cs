@@ -928,7 +928,7 @@ public sealed partial class HeadlessLogQueryBackendTests
     }
 
     [Fact]
-    public async Task ResumableSearch_AppendIsExcludedAndCapturedScopeCompletes()
+    public async Task ResumableSearch_AppendIsExcludedAndCapturedEvidenceIsQualified()
     {
         var path = await CreateFileAsync("append-resume.log", "needle\nneedle");
         using var backend = CreateBackend(CreateSnapshot(("file", path)),
@@ -950,10 +950,9 @@ public sealed partial class HeadlessLogQueryBackendTests
             cursor = result.NextCursor;
         } while (cursor != null);
         Assert.True(result.IsTraversalComplete);
-        Assert.True(result.IsQueryComplete);
+        Assert.False(result.IsQueryComplete);
         Assert.Equal(2, result.MatchingLineCount);
-        Assert.Empty(result.IncompleteReasons);
-        Assert.DoesNotContain("file_changed_during_search", result.IncompleteReasons);
+        Assert.Equal("file_grew_during_scan", Assert.Single(result.IncompleteReasons));
     }
 
     [Fact]

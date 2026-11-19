@@ -290,9 +290,19 @@ public sealed partial class HeadlessLogQueryBackend
             var truncated = files.Any(file => file.IsProvenanceTruncated || file.Events.Any(item => item.IsTruncated));
             var response = Envelope(requestId, catalog.Snapshot.Revision, failed || stopped > 0, truncated,
                 truncated ? ["monitor_output_limit"] : [], [], result);
+            if (failed && !query.Release)
+            {
+                response = response with
+                {
+                    FileOutcomes = LogFileOutcomes.Capture(state.Files.Select(static file => file.Error).OfType<ConfiguredLogRequestError>(),
+                        stopped == state.Files.Count, _limits.MaximumResponseCharacters)
+                };
+            }
             if (terminal)
                 state.Files.Clear();
-            transaction.Commit(state, response, state.RetainedBytes + JsonSerializer.SerializeToUtf8Bytes(response).LongLength * 3 + 4096, terminal);
+            var retainedBytes = state.RetainedBytes + JsonSerializer.SerializeToUtf8Bytes(response).LongLength * 3 +
+                                (response.FileOutcomes?.RetainedBytes ?? 0) + 4096;
+            transaction.Commit(state, response, retainedBytes, terminal);
             return response;
         }
         catch (ContinuationException ex)
@@ -310,15 +320,18 @@ public sealed partial class HeadlessLogQueryBackend
         }
     }
 
+    private static bool CanHandoff(QueryTraversal snapshot)
+        => snapshot.ResolverFinished && snapshot.Predicate != null && snapshot.Files.Count <= MaximumMonitorFiles &&
+           snapshot.Files.All(static file => file.Done && file.Pending.Count == 0 && file.Error == null &&
+               file.Checkpoint.Initialized && file.Checkpoint.Done && file.Checkpoint.Generation.IsKnown &&
+               file.Checkpoint.Reasons.Count == 0);
+
     private async Task<MonitorScope> CreateHandoffScopeAsync(string cursor, string revision, CancellationToken ct)
     {
         using var source = await Continuations.AcquireSnapshotAsync(cursor, revision, ct).ConfigureAwait(false);
-        if (source.State is not QueryTraversal snapshot || !snapshot.ResolverFinished || snapshot.Predicate == null ||
-            snapshot.Files.Count > MaximumMonitorFiles || snapshot.Files.Any(file => !file.Done || file.Pending.Count != 0 || file.Error != null ||
-                !file.Checkpoint.Initialized || !file.Checkpoint.Done || !file.Checkpoint.Generation.IsKnown ||
-                file.Checkpoint.Reasons.Any(reason => reason != ResumableLogScanner.FileGrewDuringScan)))
+        if (source.State is not QueryTraversal snapshot || !CanHandoff(snapshot))
             throw new ContinuationException("handoff_boundary_unavailable");
-        var predicate = snapshot.Predicate.Clone();
+        var predicate = snapshot.Predicate!.Clone();
         predicate.MaxHitsPerFile = null;
         predicate.TimestampAggregation = null;
         var state = new MonitorScope

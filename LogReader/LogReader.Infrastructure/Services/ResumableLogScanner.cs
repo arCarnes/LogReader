@@ -185,6 +185,7 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
             else if (generation != state.Generation || length < state.ObservedLength ||
                      length == state.ObservedLength && write != state.ObservedWriteUtc)
                 throw new ScanFileException("log_generation_changed");
+            RecordObservedGrowth(state, length);
             state.ObservedLength = length;
             state.ObservedWriteUtc = write;
             stream.Position = state.ReadOffset;
@@ -203,12 +204,20 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
         var write = File.GetLastWriteTimeUtc(stream.SafeFileHandle);
         if (length < state.ObservedLength || length == state.ObservedLength && write != state.ObservedWriteUtc)
             throw new ScanFileException("log_generation_changed");
+        RecordObservedGrowth(state, length);
         state.ObservedLength = length;
         state.ObservedWriteUtc = write;
         if (!state.Generation.IsKnown)
         {
             state.Reasons.Add("file_generation_unverified");
         }
+    }
+
+    private static void RecordObservedGrowth(ResumableFileCheckpoint state, long length)
+    {
+        // Size and identity cannot establish that the already captured bytes were preserved.
+        if (!state.IsLiveObservation && length > state.ObservedLength)
+            state.Reasons.Add(FileGrewDuringScan);
     }
 
     public async Task<EvaluatedScanLine?> ReadNextAsync(ResumableScanReader reader, ResumableFileCheckpoint state,

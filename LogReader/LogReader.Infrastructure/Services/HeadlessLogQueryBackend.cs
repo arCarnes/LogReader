@@ -720,8 +720,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         ValidateExclusion(request.ExcludeQuery, request.UseRegex, request.CaseSensitive, errors);
         if (request.RelativeWindow is { Length: > ConfiguredLogLimits.DefaultMaxTimestampCharacters })
             errors.Add(Error("timestamp_too_long", "The relative window is too long."));
-        if (!TimestampParser.TryBuildRange(request.StartTimestamp, request.EndTimestamp, out _, out _))
-            errors.Add(Error("invalid_timestamp_range", "The requested timestamp range is invalid."));
+        if (!TimestampParser.TryBuildRange(request.StartTimestamp, request.EndTimestamp, out _, out var rangeError))
+            errors.Add(CountTimeWindowResolver.InvalidTimestampRange(request.StartTimestamp, rangeError!));
         if (request.UseRegex && request.Query != null && !RegexPatternFactory.TryCreate(request.Query, request.CaseSensitive, out _))
             errors.Add(Error("invalid_regex", "The regular expression is invalid."));
         ValidateTimeout(request.TimeoutMilliseconds, errors);

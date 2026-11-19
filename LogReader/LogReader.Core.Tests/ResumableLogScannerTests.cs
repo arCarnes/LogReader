@@ -101,8 +101,7 @@ public sealed class ResumableLogScannerTests
                 while (!state.Done)
                     await scanner.ReadNextAsync(reader, state, request, null, new ScanWorkBudget(1000, 1024), 1024, default);
                 Assert.Equal(extent, state.ReadOffset);
-                Assert.Empty(state.Reasons);
-                Assert.DoesNotContain("file_changed_during_search", state.Reasons);
+                Assert.Equal(ResumableLogScanner.FileGrewDuringScan, Assert.Single(state.Reasons));
             }
             await File.WriteAllTextAsync(path, "x");
             var error = await Assert.ThrowsAsync<ScanFileException>(() => scanner.OpenAsync(path, state, default));
@@ -112,7 +111,7 @@ public sealed class ResumableLogScannerTests
     }
 
     [Fact]
-    public async Task FrozenExtentGrowthDuringReadCompletesAndExcludesNewBytes()
+    public async Task FrozenExtentGrowthDuringReadQualifiesEvidenceAndExcludesNewBytes()
     {
         var path = Path.GetTempFileName();
         try
@@ -129,8 +128,7 @@ public sealed class ResumableLogScannerTests
             Assert.Equal(1, first!.Number);
             await File.AppendAllTextAsync(path, "needle appended\n");
             scanner.ValidateAfterRead(reader.Stream, state);
-            Assert.Empty(state.Reasons);
-            Assert.DoesNotContain("file_changed_during_search", state.Reasons);
+            Assert.Equal(ResumableLogScanner.FileGrewDuringScan, Assert.Single(state.Reasons));
             var lines = new List<EvaluatedScanLine> { first };
             for (var attempt = 0; !state.Done && attempt < 10; attempt++)
             {

@@ -100,39 +100,58 @@ function Invoke-MonitorConsistencyMeasurement {
     $released = Invoke-MonitorSample 'release' @{ cursor = $state.cursor; release = $true }
     if ($released.Response.result.structuredContent.data.state -ne 'released') { throw 'Monitor release was not terminal.' }
 
-    # Freeze a real snapshot before a controlled append, finish that same investigation,
-    # and explicitly transfer its verified append-drift boundary. Never restart it.
+    function Complete-MonitorSnapshot([object]$Sample, [int]$RequestIdBase) {
+        $pages = 1
+        $envelope = $Sample.Response.result.structuredContent
+        while ($null -ne $envelope.continuation -and $pages -lt 20) {
+            $arguments = @{ cursor = $envelope.continuation.cursor; timeoutMilliseconds = $Timeout }
+            $pages++
+            $Sample = Invoke-ToolMeasurement $Process ($RequestIdBase + $pages) $envelope.continuation.tool $arguments $Timeout
+            $envelope = $Sample.Response.result.structuredContent
+        }
+        if ($null -ne $envelope.continuation) { throw 'Snapshot exceeded its bounded fixture page allowance.' }
+        return @{ envelope = $envelope; pages = $pages }
+    }
+
+    # A continuation excludes appended bytes while retaining the growth caveat.
     Add-MonitorLines "handoff-needle one`nhandoff-needle two`nsource trailing evidence`n" 0
     $searchArguments = @{
         targets = @(@{ kind = 'logFile'; id = $FileIds[0] }); query = 'handoff-needle'
         enableHandoff = $true; maxTotalHits = 1; maxHitsPerFile = 1; timeoutMilliseconds = $Timeout
     }
     $source = Invoke-ToolMeasurement $Process 11000 'search_logs' $searchArguments $Timeout
-    $snapshot = $source.Response.result.structuredContent.data
     if ([string]::IsNullOrEmpty($source.Response.result.structuredContent.continuation.cursor)) { throw 'Snapshot fixture did not establish a continuation before the append.' }
     Add-MonitorLines "handoff-needle after frozen extent`n" 0
-    $sourcePages = 1
-    while (-not [string]::IsNullOrEmpty($source.Response.result.structuredContent.continuation.cursor) -and $sourcePages -lt 20) {
-        $continueArguments = @{ cursor = $source.Response.result.structuredContent.continuation.cursor; timeoutMilliseconds = $Timeout }
-        $sourcePages++
-        $source = Invoke-ToolMeasurement $Process (11000 + $sourcePages) 'continue_log_search' $continueArguments $Timeout
-        $snapshot = $source.Response.result.structuredContent.data
-    }
-    if ($snapshot.matchingLineCount -ne 2 -or -not $snapshot.isTraversalComplete -or -not $snapshot.scanComplete -or
-        $snapshot.incompleteReasons -contains 'file_grew_during_scan' -or [string]::IsNullOrEmpty($snapshot.handoffCursor)) {
+    $growth = Complete-MonitorSnapshot $source 11000
+    $growthEnvelope = $growth.envelope
+    $snapshot = $growthEnvelope.data
+    if ($snapshot.matchingLineCount -ne 2 -or -not $snapshot.isTraversalComplete -or $snapshot.scanComplete -or
+        $growthEnvelope.status -ne 'partial' -or $growthEnvelope.issues.code -notcontains 'file_grew_during_scan' -or
+        $null -ne $growthEnvelope.continuation -or $null -ne $snapshot.handoffCursor) {
         throw "Snapshot extent/terminal uncertainty differed: matches=$($snapshot.matchingLineCount), traversal=$($snapshot.isTraversalComplete), exact=$($snapshot.scanComplete), reasons=$($snapshot.incompleteReasons -join ',')."
     }
-    $handoff = Invoke-MonitorSample 'explicit_handoff' @{ handoffCursor = $snapshot.handoffCursor; timeoutMilliseconds = $Timeout }
+
+    # Finish an independent stable snapshot before writing the first observation event.
+    Add-MonitorLines "verified-needle before handoff`n" 0
+    $verified = Invoke-ToolMeasurement $Process 11100 'search_logs' @{
+        targets = $searchArguments.targets; query = 'verified-needle'; enableHandoff = $true; timeoutMilliseconds = $Timeout
+    } $Timeout
+    $boundary = (Complete-MonitorSnapshot $verified 11100).envelope.data
+    if (-not $boundary.scanComplete -or $boundary.matchingLineCount -ne 1 -or [string]::IsNullOrEmpty($boundary.handoffCursor)) {
+        throw 'Stable snapshot did not return a verified handoff boundary.'
+    }
+    Add-MonitorLines "verified-needle after frozen extent`n" 0
+    $handoff = Invoke-MonitorSample 'explicit_handoff' @{ handoffCursor = $boundary.handoffCursor; timeoutMilliseconds = $Timeout }
     $handoffResult = $handoff.Response.result.structuredContent.data
     $handoffEvents = @($handoffResult.files.events | Where-Object { $null -ne $_ })
-    if ($handoffEvents.Count -ne 1 -or $handoffEvents[0].text -ne 'handoff-needle after frozen extent') {
+    if ($handoffEvents.Count -ne 1 -or $handoffEvents[0].text -ne 'verified-needle after frozen extent') {
         throw 'Explicit handoff did not deliver exactly the post-snapshot append.'
     }
     $null = Invoke-MonitorSample 'handoff_release' @{ cursor = $handoff.Response.result.structuredContent.continuation.cursor; release = $true }
     return [ordered]@{
         physicalFiles = $FileIds.Count; duplicateRoutesDeduplicated = $true; replayVerified = $true
-        hotQuietVerified = $hotQuietVerified; frozenExtentAndCompletionVerified = $true
-        explicitHandoffVerified = $true; sourcePages = $sourcePages; rows = $state.rows.ToArray()
+        hotQuietVerified = $hotQuietVerified; frozenExtentAndGrowthUncertaintyVerified = $true
+        explicitHandoffVerified = $true; sourcePages = $growth.pages; rows = $state.rows.ToArray()
         unc = $(if ($UsesUnc) { 'Real UNC synthetic fixture under the supplied test root; parent/sibling directories were not enumerated.' } else { 'Local fixture; real UNC evidence is recorded in separate supplied-root runs.' })
     }
 }

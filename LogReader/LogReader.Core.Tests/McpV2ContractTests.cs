@@ -155,6 +155,33 @@ public sealed partial class McpLogToolsTests
 
 public sealed partial class HeadlessLogQueryBackendTests
 {
+    [Theory]
+    [InlineData("search_logs", "{\"startTimestamp\":\"bad\"}", "invalid_timestamp_range", "/startTimestamp")]
+    [InlineData("count_logs", "{\"endTimestamp\":\"bad\"}", "invalid_timestamp_range", "/endTimestamp")]
+    [InlineData("count_logs", "{\"startTimestamp\":\"2026-11-19T12:00:00Z\",\"endTimestamp\":\"13:00\"}", "invalid_timestamp_range", "/endTimestamp")]
+    [InlineData("start_log_monitor", "{\"startTimestamp\":\"13:00\",\"endTimestamp\":\"12:00\"}", "invalid_timestamp_range", "/endTimestamp")]
+    [InlineData("count_logs", "{\"startTimestamp\":\"12:00\",\"relativeWindow\":\"today\"}", "conflicting_time_window", "/relativeWindow")]
+    [InlineData("count_logs", "{\"relativeWindow\":\"last 366d\"}", "relative_window_limit_exceeded", "/relativeWindow")]
+    [InlineData("count_logs", "{\"startTimestamp\":\"00:00\",\"endTimestamp\":\"23:00\",\"bucketSize\":\"minute\"}", "count_bucket_limit_exceeded", "/bucketSize")]
+    public async Task PublishedContracts_PointToCorrectableTimeArguments(string tool, string input, string code, string path)
+    {
+        using var backend = CreateBackend(CreateSnapshot());
+        await McpLogToolsTests.WithV2ClientAsync(backend, async client =>
+        {
+            var arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(input)!
+                .ToDictionary(pair => pair.Key, pair => (object?)pair.Value);
+            arguments["targets"] = new[] { new { kind = "logFile", id = "file" } };
+            arguments["query"] = "needle";
+            var body = McpLogToolsTests.AssertV2(await client.CallToolAsync(tool, arguments), "error");
+            var issue = Assert.Single(body.GetProperty("issues").EnumerateArray());
+            Assert.Equal(code, issue.GetProperty("code").GetString());
+            Assert.Equal("argument", issue.GetProperty("scope").GetString());
+            Assert.Equal("correct_arguments", issue.GetProperty("recovery").GetString());
+            Assert.Equal(path, issue.GetProperty("argumentPath").GetString());
+            Assert.True(McpV2Response.CompileSchema(McpLogTools.CreateToolCollection(backend)[tool].ProtocolTool.OutputSchema!.Value).Evaluate(body).IsValid);
+        });
+    }
+
     [Fact]
     public async Task V2_ConcurrentCursorOnlyCallsReplayAndRetainOriginalSelection()
     {
@@ -216,38 +243,61 @@ public sealed partial class HeadlessLogQueryBackendTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task V2_CursorOnlyContinuationCompletesCapturedExtentDespiteRepeatedAppends(bool count)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task V2_ObservedGrowthQualifiesTheFrozenExtent(bool count, bool rewrite)
     {
-        var path = await CreateFileAsync("v2-growth.log", "needle\nneedle");
+        var path = await CreateFileAsync("v2-growth.log", "needle\nneedle\nneedle\n");
         using var backend = CreateBackend(CreateSnapshot(("file", path)), limits: LogQueryEffectiveLimits.Default with { SearchScanBytes = 3 });
         await McpLogToolsTests.WithV2ClientAsync(backend, async client =>
         {
+            var tools = McpLogTools.CreateToolCollection(backend);
             var start = count ? "count_logs" : "search_logs";
-            var response = await client.CallToolAsync(start, new Dictionary<string, object?>
+            var initial = await client.CallToolAsync(start, new Dictionary<string, object?>
             {
                 ["targets"] = new[] { new { kind = "logFile", id = "file" } }, ["query"] = "needle", ["enableHandoff"] = true
             });
-            var body = McpLogToolsTests.AssertV2(response, "success");
-            JsonElement? lastInput = null;
+            var body = McpLogToolsTests.AssertV2(initial, "success");
+            Assert.False(body.GetProperty("data").TryGetProperty("handoffCursor", out _));
+            if (rewrite)
+                await File.WriteAllTextAsync(path, "needle\nneedle\nnormal\nneedle appended\n");
+            else
+                await File.AppendAllTextAsync(path, "needle appended\n");
+
+            JsonElement? submitted = null;
             for (var page = 0; body.GetProperty("continuation").ValueKind != JsonValueKind.Null && page < 100; page++)
             {
-                await File.AppendAllTextAsync(path, "\nneedle appended");
-                lastInput = body.GetProperty("continuation");
-                var tool = lastInput.Value.GetProperty("tool").GetString()!;
-                response = await client.CallToolAsync(tool, new Dictionary<string, object?> { ["cursor"] = lastInput.Value.GetProperty("cursor").GetString() });
-                body = McpLogToolsTests.AssertV2(response, "success");
-                Assert.Empty(body.GetProperty("issues").EnumerateArray());
-                Assert.DoesNotContain("file_grew", body.GetRawText(), StringComparison.Ordinal);
-                Assert.True(McpV2Response.CompileSchema(McpLogTools.CreateToolCollection(backend)[tool].ProtocolTool.OutputSchema!.Value).Evaluate(body).IsValid);
+                submitted = body.GetProperty("continuation");
+                var tool = submitted.Value.GetProperty("tool").GetString()!;
+                var response = await client.CallToolAsync(tool, new Dictionary<string, object?>
+                    { ["cursor"] = submitted.Value.GetProperty("cursor").GetString() });
+                body = McpLogToolsTests.AssertV2(response, "partial");
+                var issue = Assert.Single(body.GetProperty("issues").EnumerateArray());
+                Assert.Equal("file_grew_during_scan", issue.GetProperty("code").GetString());
+                Assert.Equal("file", issue.GetProperty("scope").GetString());
+                Assert.Equal("file", issue.GetProperty("fileId").GetString());
+                Assert.Equal("report_failure", issue.GetProperty("recovery").GetString());
+                Assert.True(McpV2Response.CompileSchema(tools[tool].ProtocolTool.OutputSchema!.Value).Evaluate(body).IsValid);
+                if (page == 0)
+                {
+                    var handoff = await client.CallToolAsync("start_log_monitor_from_snapshot", new Dictionary<string, object?>
+                        { ["handoffCursor"] = body.GetProperty("continuation").GetProperty("cursor").GetString() });
+                    var rejected = McpLogToolsTests.AssertV2(handoff, "error");
+                    Assert.Equal("handoff_boundary_unavailable",
+                        Assert.Single(rejected.GetProperty("issues").EnumerateArray()).GetProperty("code").GetString());
+                }
             }
             Assert.Equal(JsonValueKind.Null, body.GetProperty("continuation").ValueKind);
-            Assert.True(body.GetProperty("data").GetProperty("scanComplete").GetBoolean());
-            Assert.Equal(2, body.GetProperty("data").GetProperty("matchingLineCount").GetInt64());
-            Assert.NotNull(lastInput);
-            var replay = await client.CallToolAsync(lastInput.Value.GetProperty("tool").GetString()!,
-                new Dictionary<string, object?> { ["cursor"] = lastInput.Value.GetProperty("cursor").GetString() });
+            var data = body.GetProperty("data");
+            Assert.True(data.GetProperty("isTraversalComplete").GetBoolean());
+            Assert.False(data.GetProperty("scanComplete").GetBoolean());
+            Assert.Equal(rewrite ? 2 : 3, data.GetProperty("matchingLineCount").GetInt64());
+            Assert.False(data.TryGetProperty("handoffCursor", out _));
+            Assert.NotNull(submitted);
+            var replay = await client.CallToolAsync(submitted.Value.GetProperty("tool").GetString()!,
+                new Dictionary<string, object?> { ["cursor"] = submitted.Value.GetProperty("cursor").GetString() });
             Assert.Equal(body.GetRawText(), replay.StructuredContent!.Value.GetRawText());
         });
     }
@@ -272,6 +322,101 @@ public sealed partial class HeadlessLogQueryBackendTests
             Assert.Equal(expected, string.Join(",", lines.Select(l => l.GetProperty("text").GetString())));
             Assert.Equal(lines.Select(l => l.GetProperty("lineNumber").GetInt64()).Order(), lines.Select(l => l.GetProperty("lineNumber").GetInt64()));
             Assert.True(McpV2Response.CompileSchema(McpLogTools.CreateToolCollection(backend)["read_log_lines"].ProtocolTool.OutputSchema!.Value).Evaluate(body).IsValid);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task V2_SearchOutcomesIncludeEarlierFileFailures(bool includeReadable)
+    {
+        var first = Path.Combine(_testDirectory, "missing-first.log");
+        var second = includeReadable
+            ? await CreateFileAsync("readable-second.log", "no match\n")
+            : Path.Combine(_testDirectory, "missing-second.log");
+        using var backend = CreateBackend(CreateSnapshot(("first", first), ("second", second)));
+        await McpLogToolsTests.WithV2ClientAsync(backend, async client =>
+        {
+            var result = await client.CallToolAsync("search_logs", new Dictionary<string, object?>
+            {
+                ["targets"] = new[] { new { kind = "logFile", id = "first" }, new { kind = "logFile", id = "second" } },
+                ["query"] = "needle", ["maxFiles"] = 1
+            });
+            var page = McpLogToolsTests.AssertV2(result, "partial");
+            Assert.Equal("first", Assert.Single(page.GetProperty("issues").EnumerateArray()).GetProperty("fileId").GetString());
+            var next = page.GetProperty("continuation");
+            var arguments = new Dictionary<string, object?> { ["cursor"] = next.GetProperty("cursor").GetString() };
+            var tool = next.GetProperty("tool").GetString()!;
+            var final = McpLogToolsTests.AssertV2(await client.CallToolAsync(tool, arguments), includeReadable ? "partial" : "error");
+            Assert.Equal(JsonValueKind.Null, final.GetProperty("continuation").ValueKind);
+            Assert.Equal(includeReadable ? new[] { "first" } : new[] { "first", "second" },
+                final.GetProperty("issues").EnumerateArray().Select(issue => issue.GetProperty("fileId").GetString()));
+            if (includeReadable)
+            {
+                var data = final.GetProperty("data");
+                Assert.Empty(data.GetProperty("files").EnumerateArray());
+                Assert.Equal(0, data.GetProperty("matchingLineCount").GetInt64());
+                Assert.False(data.GetProperty("scanComplete").GetBoolean());
+            }
+            else
+                Assert.Equal(JsonValueKind.Null, final.GetProperty("data").ValueKind);
+
+            Assert.True(McpV2Response.CompileSchema(McpLogTools.CreateToolCollection(backend)[tool].ProtocolTool.OutputSchema!.Value).Evaluate(final).IsValid);
+            Assert.Equal(final.GetRawText(), (await client.CallToolAsync(tool, arguments)).StructuredContent!.Value.GetRawText());
+        });
+    }
+
+    [Fact]
+    public async Task V2_CountClassifiesAllFailuresEvenWhenIssuesAreCapped()
+    {
+        var files = Enumerable.Range(1, 72).Select(i => ($"file-{i:D2}", Path.Combine(_testDirectory, $"missing-{i:D2}.log"))).ToArray();
+        using var backend = CreateBackend(CreateSnapshot(files));
+        await McpLogToolsTests.WithV2ClientAsync(backend, async client =>
+        {
+            var result = await client.CallToolAsync("count_logs", new Dictionary<string, object?>
+            {
+                ["targets"] = new[] { new { kind = "dashboard", id = "dashboard" } },
+                ["query"] = "needle"
+            });
+            var body = McpLogToolsTests.AssertV2(result, "error");
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("data").ValueKind);
+            var issues = body.GetProperty("issues").EnumerateArray().ToArray();
+            Assert.Equal(files.Take(64).Select(file => file.Item1),
+                issues[..^1].Select(issue => issue.GetProperty("fileId").GetString()));
+            Assert.Equal("file_issues_truncated", issues[^1].GetProperty("code").GetString());
+            Assert.StartsWith("8 ", issues[^1].GetProperty("message").GetString(), StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public async Task V2_MonitorReportsAllStoppedFilesAcrossPolls()
+    {
+        var first = await CreateFileAsync("monitor-first.log", "one\n");
+        var second = await CreateFileAsync("monitor-second.log", "two\n");
+        using var backend = CreateBackend(CreateSnapshot(("first", first), ("second", second)));
+        await McpLogToolsTests.WithV2ClientAsync(backend, async client =>
+        {
+            var initial = McpLogToolsTests.AssertV2(await client.CallToolAsync("start_log_monitor", new Dictionary<string, object?>
+            {
+                ["targets"] = new[] { new { kind = "logFile", id = "first" }, new { kind = "logFile", id = "second" } }
+            }), "success");
+            await File.WriteAllTextAsync(first, "");
+            await File.WriteAllTextAsync(second, "");
+
+            var partial = McpLogToolsTests.AssertV2(await PollAsync(initial), "partial");
+            Assert.Equal("first", Assert.Single(partial.GetProperty("issues").EnumerateArray()).GetProperty("fileId").GetString());
+            var final = McpLogToolsTests.AssertV2(await PollAsync(partial), "error");
+            Assert.Equal(JsonValueKind.Null, final.GetProperty("continuation").ValueKind);
+            Assert.Equal(JsonValueKind.Null, final.GetProperty("data").ValueKind);
+            Assert.Equal(new[] { "first", "second" },
+                final.GetProperty("issues").EnumerateArray().Select(issue => issue.GetProperty("fileId").GetString()));
+            Assert.Equal(final.GetRawText(), (await PollAsync(partial)).StructuredContent!.Value.GetRawText());
+
+            async Task<CallToolResult> PollAsync(JsonElement previous) => await client.CallToolAsync("poll_log_monitor",
+                new Dictionary<string, object?>
+                {
+                    ["cursor"] = previous.GetProperty("continuation").GetProperty("cursor").GetString(), ["maxFiles"] = 1
+                });
         });
     }
 

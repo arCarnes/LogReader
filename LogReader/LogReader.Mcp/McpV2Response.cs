@@ -43,24 +43,19 @@ internal static class McpV2Response
         if (data?["errors"] is JsonArray treeErrors)
             foreach (var error in treeErrors)
                 issues.Add(Issue(error!.Deserialize<ConfiguredLogRequestError>(McpV2Tools.JsonOptions)!));
-        var files = data?["files"] is JsonArray many ? many.OfType<JsonObject>().ToArray()
-            : data?["file"] is JsonObject one ? [one] : Array.Empty<JsonObject>();
-        foreach (var file in files)
-        {
-            if (file["error"] is JsonNode error)
-                issues.Add(Issue(error.Deserialize<ConfiguredLogRequestError>(McpV2Tools.JsonOptions)!, file["fileId"]?.GetValue<string>()));
-            else if (file["incompleteReasons"] is JsonArray reasons)
-                foreach (var reason in reasons.Select(r => r!.GetValue<string>()).Where(r => r is "file_generation_unverified" or "timestamp_bucket_unassigned"))
-                    issues.Add(new(reason, "file", "The captured file evidence could not be fully verified. Report the available evidence without restarting automatically.",
-                        "report_failure", FileId: file["fileId"]?.GetValue<string>()));
-        }
-        issues = issues.Distinct().ToList();
         var wholeFailure = data == null || issues.Any(i => i.Scope is "argument" or "continuity") ||
             issues.Any(i => i.Scope == "request") && next == null;
-        if (files.Length > 0 && files.All(f => f["error"] != null))
+        if (response.FileOutcomes is { } outcomes)
         {
-            var selected = data?["selectedFileCount"]?.GetValue<int>() ?? files.Length;
-            wholeFailure |= next == null && files.Length >= selected;
+            wholeFailure |= outcomes.WhollyUnevaluable;
+            issues.AddRange(outcomes.Issues.Select(error => Issue(error, error.TargetId)));
+            if (outcomes.OmittedIssueCount > 0)
+                issues.Add(new("file_issues_truncated", "request",
+                    $"{outcomes.OmittedIssueCount} additional file issues were omitted.", "report_failure"));
+        }
+        else
+        {
+            wholeFailure |= AddFileIssues(data, next, issues);
         }
         var status = wholeFailure ? "error" : issues.Count > 0 ? "partial" : "success";
         if (data != null)
@@ -72,14 +67,31 @@ internal static class McpV2Response
         var continuationTool = typeof(T) == typeof(LogSearchResult) ? "continue_log_search"
             : typeof(T) == typeof(LogCountResult) ? "continue_log_count" : "poll_log_monitor";
         return Serialize(new(SchemaVersion, response.RequestId, response.CatalogRevision, status,
-            wholeFailure ? null : data, issues, !wholeFailure && next != null ? new(continuationTool, next) : null));
+            wholeFailure ? null : data, issues.Distinct().ToArray(), !wholeFailure && next != null ? new(continuationTool, next) : null));
+    }
+
+    private static bool AddFileIssues(JsonNode? data, string? next, List<McpIssue> issues)
+    {
+        var files = data?["files"] is JsonArray many ? many.OfType<JsonObject>().ToArray()
+            : data?["file"] is JsonObject one ? [one] : Array.Empty<JsonObject>();
+        foreach (var file in files)
+        {
+            if (file["error"] is JsonNode error)
+                issues.Add(Issue(error.Deserialize<ConfiguredLogRequestError>(McpV2Tools.JsonOptions)!, file["fileId"]?.GetValue<string>()));
+            else if (file["incompleteReasons"] is JsonArray reasons)
+                foreach (var reason in reasons.Select(r => r!.GetValue<string>()).Where(r => r is "file_generation_unverified" or "timestamp_bucket_unassigned"))
+                    issues.Add(new(reason, "file", "The captured file evidence could not be fully verified. Report the available evidence without restarting automatically.",
+                        "report_failure", FileId: file["fileId"]?.GetValue<string>()));
+        }
+        var selected = data?["selectedFileCount"]?.GetValue<int>() ?? files.Length;
+        return next == null && files.Length > 0 && files.Length >= selected && files.All(f => f["error"] != null);
     }
 
     private static McpIssue Issue(ConfiguredLogRequestError error, string? fileId = null, Type? dataType = null)
     {
         var continuity = error.Code.Contains("cursor", StringComparison.Ordinal) &&
             !error.Code.EndsWith("_required", StringComparison.Ordinal) || error.Code == "handoff_boundary_unavailable";
-        var path = error.Code switch
+        var path = error.ArgumentPath ?? (error.Code switch
         {
             "query_required" or "query_too_long" => "/query",
             "invalid_exclude_query" => "/excludeQuery",
@@ -87,8 +99,8 @@ internal static class McpV2Response
             "targets_required" or "invalid_targets" or "target_limit_exceeded" => "/targets",
             "file_id_required" or "invalid_file_id" => "/fileId",
             "invalid_date_offset" => "/dateOffsetDays",
-            "invalid_bucket_size" or "count_bucket_range_required" or "unsupported_time_bucket" => "/bucketSize",
-            "invalid_relative_window" => "/relativeWindow",
+            "invalid_bucket_size" or "count_bucket_range_required" or "unsupported_time_bucket" or "count_bucket_limit_exceeded" => "/bucketSize",
+            "invalid_relative_window" or "relative_window_limit_exceeded" => "/relativeWindow",
             "invalid_timeout" => "/timeoutMilliseconds",
             "invalid_line_count" => dataType == typeof(LogMonitorResult) ? "/maxLines" : "/count",
             "invalid_file_limit" => "/maxFiles",
@@ -97,7 +109,7 @@ internal static class McpV2Response
             "invalid_query_hit_limit" => "/maxQueryHits",
             "invalid_observation_period" => "/observeForMilliseconds",
             _ => (string?)null
-        };
+        });
         var scope = fileId != null ? "file" : continuity ? "continuity" : path != null ? "argument" : "request";
         var recovery = scope == "argument" ? "correct_arguments" : continuity ? "report_gap"
             : error.Code is "unknown_target" or "target_kind_mismatch" ? "rediscover"
@@ -143,7 +155,7 @@ internal static class McpV2Response
         var root = JsonNode.Parse(shared.GetRawText())!.AsObject();
         var data = root["properties"]!["result"]!.DeepClone();
         NormalizeSchema(data);
-        data["description"] = "Operation data. scanComplete describes successful evaluation of captured extents; ordinary appends do not prevent completion. Null on rejection or wholly unevaluable scope.";
+        data["description"] = "Operation data. scanComplete requires evaluation of captured extents with verifiable file contents. Null on rejection or wholly unevaluable scope.";
         data["properties"]!["isTruncated"] = new JsonObject { ["type"] = "boolean" };
         data["properties"]!["truncationReasons"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } };
         var schema = JsonNode.Parse("""
@@ -153,7 +165,7 @@ internal static class McpV2Response
           "properties":{
             "schemaVersion":{"type":"integer","const":5},
             "requestId":{"type":"string"},"catalogRevision":{"type":"string"},
-            "status":{"type":"string","enum":["success","partial","error"],"description":"Pagination and ordinary appends are successful. Partial means useful evidence with actual failures or detected integrity problems. Error means rejected or wholly unevaluable."},
+            "status":{"type":"string","enum":["success","partial","error"],"description":"Routine pagination is successful. Partial means available evidence with file failures or unverified contents. Error means rejected or wholly unevaluable."},
             "issues":{"type":"array","items":{"type":"object","additionalProperties":false,
               "required":["code","scope","message","recovery"],"properties":{
                 "code":{"type":"string"},"scope":{"type":"string","enum":["argument","request","file","continuity"]},
@@ -183,8 +195,10 @@ internal static class McpV2Response
                     if (name != property.Key)
                     {
                         properties.Remove(property.Key); properties[name] = property.Value;
-                        property.Value!["description"] = "True when the captured extent was fully evaluated. Later appends are outside that scope and do not prevent completion.";
+                        property.Value!["description"] = "True when the captured extent was fully evaluated with verifiable file contents.";
                     }
+                    if (name == "handoffCursor")
+                        property.Value!["description"] = "Opt-in boundary for start_log_monitor_from_snapshot, available after the scan finishes with verified file contents.";
                 }
                 if (properties.ContainsKey("provenanceRefs")) obj.Remove("oneOf");
                 if (properties.ContainsKey("provenanceTable")) obj.Remove("allOf");

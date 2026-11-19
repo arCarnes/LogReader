@@ -290,19 +290,22 @@ public sealed partial class HeadlessLogQueryBackendTests
     }
 
     [Fact]
-    public async Task Handoff_PartialExpiredAndChangedCatalogSourcesRejectWithoutFallback()
+    public async Task Handoff_ActiveAndExpiredSearchCursorsRejectWithoutFallback()
     {
         var now = DateTimeOffset.UtcNow;
         var path = await CreateFileAsync("handoff-partial.log", "needle\nneedle\n");
         var catalog = new MutableCatalogReader(CreateSnapshot(("file", path)));
         using var backend = CreateBackend(catalog.Snapshot, now: () => now, catalogReader: catalog);
         var partial = await backend.SearchLogsAsync(new()
-        { Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle", EnableHandoff = true, MaxQueryHits = 1 });
-        var rejected = await backend.MonitorLogsAsync(new() { HandoffCursor = partial.Result!.HandoffCursor });
+        { Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle", EnableHandoff = true, MaxTotalHits = 1 });
+        Assert.Null(partial.Result!.HandoffCursor);
+        var cursor = partial.Result.NextCursor;
+        Assert.NotNull(cursor);
+        var rejected = await backend.MonitorLogsAsync(new() { HandoffCursor = cursor });
         Assert.Equal("handoff_boundary_unavailable", Assert.Single(rejected.Errors).Code);
         Assert.Null(rejected.Result);
         now = now.AddMinutes(16);
-        var expired = await backend.MonitorLogsAsync(new() { HandoffCursor = partial.Result.HandoffCursor });
+        var expired = await backend.MonitorLogsAsync(new() { HandoffCursor = cursor });
         Assert.Equal("expired_monitor_cursor", Assert.Single(expired.Errors).Code);
     }
     [Fact]
@@ -408,9 +411,8 @@ public sealed partial class HeadlessLogQueryBackendTests
         });
         Assert.False(source.Result!.IsTraversalComplete);
         Assert.Equal(1, source.Result.MatchingLineCount);
-        var handoff = await backend.MonitorLogsAsync(new() { HandoffCursor = source.Result.HandoffCursor });
-        Assert.Null(handoff.Result);
-        Assert.Equal("handoff_boundary_unavailable", Assert.Single(handoff.Errors).Code);
+        Assert.Null(source.Result.HandoffCursor);
+        Assert.Null(source.Result.NextCursor);
     }
 
     [Theory]

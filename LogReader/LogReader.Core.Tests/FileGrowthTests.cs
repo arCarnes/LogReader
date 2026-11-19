@@ -13,7 +13,7 @@ public sealed partial class HeadlessLogQueryBackendTests
     [InlineData("countsOnly")]
     [InlineData("count")]
     [InlineData("count-hour")]
-    public async Task FileGrowth_SnapshotWireResultsRetainEvidenceAndExplicitHandoffUsesFrozenBoundary(string operation)
+    public async Task FileGrowth_SnapshotWireResultsRetainQualifiedEvidence(string operation)
     {
         var path = await CreateFileAsync("growth-wire.log",
             "2026-11-04T10:00:00Z needle\n2026-11-04T10:01:00Z needle\n");
@@ -38,7 +38,7 @@ public sealed partial class HeadlessLogQueryBackendTests
                 returnedHits += result.GetProperty("returnedHitCount").GetInt32();
                 if (result.GetProperty("files").GetArrayLength() > 0)
                 {
-                    Assert.DoesNotContain("file_grew_during_scan", Reasons(result, "pageIncompleteReasons"));
+                    Assert.Contains("file_grew_during_scan", Reasons(result, "pageIncompleteReasons"));
                 }
                 else
                     Assert.False(result.TryGetProperty("pageIncompleteReasons", out _));
@@ -47,16 +47,17 @@ public sealed partial class HeadlessLogQueryBackendTests
         }
         Assert.Null(cursor);
         Assert.True(result.GetProperty("isTraversalComplete").GetBoolean());
-        Assert.True(result.GetProperty(count ? "isComplete" : "isQueryComplete").GetBoolean());
+        Assert.False(result.GetProperty(count ? "isComplete" : "isQueryComplete").GetBoolean());
         Assert.Equal("scope_exhausted", result.GetProperty("stopReason").GetString());
         Assert.Equal(2, result.GetProperty("matchingLineCount").GetInt64());
         Assert.Equal(2, result.GetProperty("matchOccurrenceCount").GetInt64());
-        Assert.Empty(Reasons(result, "incompleteReasons"));
+        Assert.Equal("file_grew_during_scan", Assert.Single(Reasons(result, "incompleteReasons")));
+        Assert.False(result.TryGetProperty("handoffCursor", out _));
         Assert.Equal(count ? 4 : 7, result.GetProperty("contractVersion").GetInt32());
         var file = Assert.Single(result.GetProperty("files").EnumerateArray());
-        Assert.True(file.GetProperty("isCountExact").GetBoolean());
+        Assert.False(file.GetProperty("isCountExact").GetBoolean());
         Assert.False(file.TryGetProperty("error", out _));
-        Assert.Empty(Reasons(file, "incompleteReasons"));
+        Assert.Equal("file_grew_during_scan", Assert.Single(Reasons(file, "incompleteReasons")));
         if (!count)
         {
             Assert.Equal(operation == "countsOnly" ? 0 : 2, returnedHits);
@@ -65,44 +66,6 @@ public sealed partial class HeadlessLogQueryBackendTests
             Assert.Equal(2, result.GetProperty("buckets").EnumerateArray()
                 .Sum(bucket => bucket.GetProperty("matchingLineCount").GetInt64()));
         Assert.Equal(result.GetRawText(), Result(await Run(terminalInput)).GetRawText());
-
-        var handoff = await backend.MonitorLogsAsync(new()
-        {
-            HandoffCursor = result.GetProperty("handoffCursor").GetString(), TimeoutMilliseconds = 5000
-        });
-        var monitorCursor = handoff.Result?.NextCursor;
-        try
-        {
-            Assert.Empty(handoff.Errors);
-            var current = handoff;
-            var events = new List<LogMonitorEvent>();
-            for (var page = 0; page < 100; page++)
-            {
-                Assert.Empty(current.Errors);
-                var observed = Assert.Single(current.Result!.Files);
-                Assert.Null(observed.Error);
-                events.AddRange(observed.Events);
-                if (current.Result.IsCaughtUp) break;
-                current = await backend.MonitorLogsAsync(new() { Cursor = monitorCursor, TimeoutMilliseconds = 5000 });
-                monitorCursor = current.Result?.NextCursor ?? monitorCursor;
-            }
-            Assert.True(current.Result!.IsCaughtUp);
-            Assert.Equal("2026-11-04T10:02:00Z needle appended", Assert.Single(events).Text);
-            var poll = new LogMonitorQuery { Cursor = monitorCursor, TimeoutMilliseconds = 5000 };
-            var idle = await backend.MonitorLogsAsync(poll);
-            monitorCursor = idle.Result?.NextCursor ?? monitorCursor;
-            Assert.Empty(idle.Errors);
-            Assert.True(idle.Result!.IsIdle);
-            Assert.Empty(idle.Result.Files.SelectMany(item => item.Events));
-            Assert.Same(idle, await backend.MonitorLogsAsync(poll));
-            Assert.Equal(result.GetRawText(), Result(await Run(terminalInput)).GetRawText());
-        }
-        finally
-        {
-            // A failed assertion must not leave retained observation state behind.
-            if (monitorCursor != null)
-                await backend.MonitorLogsAsync(new() { Cursor = monitorCursor, Release = true });
-        }
 
         Task<CallToolResult> Run(string? next) => count
             ? tools.CountLogsAsync(targets, "needle", startTimestamp: "2026-11-04T10:00:00Z",

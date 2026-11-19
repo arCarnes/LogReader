@@ -247,7 +247,7 @@ internal static partial class McpWorkflowMeasurements
                     else arguments.Remove("cursor");
                     var response = await CallAsync(tool, arguments);
                     result = response.Result;
-                    RejectFileErrors(result);
+                    RejectFileErrors(response);
                     if (operation == "search-snapshot")
                         foreach (var file in result.GetProperty("files").EnumerateArray())
                             foreach (var hit in file.GetProperty("hits").EnumerateArray())
@@ -277,7 +277,7 @@ internal static partial class McpWorkflowMeasurements
                 {
                     var response = await CallAsync("read_log_lines", new { fileId = scope.Files[i].Label, anchor = "start", offset = 0, count = 100 });
                     RejectIncompleteEnvelope(response);
-                    RejectFileErrors(response.Result);
+                    RejectFileErrors(response);
                     var lines = response.Result.GetProperty("file").GetProperty("lines").EnumerateArray().ToArray();
                     if (lines.Any(line => line.TryGetProperty("isTruncated", out var truncated) && truncated.GetBoolean()) ||
                         !lines.Select(line => line.GetProperty("text").GetString()).SequenceEqual(reference[i].FirstLines) ||
@@ -296,7 +296,7 @@ internal static partial class McpWorkflowMeasurements
                     var initial = await CallAsync("start_log_monitor", new { targets = Targets(), query = "needle", timeoutMilliseconds = 30000 });
                     cursor = initial.Cursor;
                     RejectIncompleteEnvelope(initial);
-                    RejectFileErrors(initial.Result);
+                    RejectFileErrors(initial);
                     if (cursor == null || initial.Result.GetProperty("selectedFileCount").GetInt32() != scope.Files.Length ||
                         initial.Result.GetProperty("stoppedFileCount").GetInt32() != 0 ||
                         !initial.Result.GetProperty("files").EnumerateArray().Select(f => f.GetProperty("fileId").GetString())
@@ -315,7 +315,7 @@ internal static partial class McpWorkflowMeasurements
                             var result = poll.Result;
                             cursor = poll.Cursor;
                             RejectIncompleteEnvelope(poll);
-                            RejectFileErrors(result);
+                            RejectFileErrors(poll);
                             var files = result.GetProperty("files").EnumerateArray().ToArray();
                             if (files.Length != result.GetProperty("checkedFileCount").GetInt32() ||
                                 files.Any(f => f.GetProperty("events").GetArrayLength() != 0) ||
@@ -371,11 +371,11 @@ internal static partial class McpWorkflowMeasurements
         }
     }
 
-    private static void RejectFileErrors(JsonElement result)
+    private static void RejectFileErrors(McpMeasurementResponse response)
     {
-        IEnumerable<JsonElement> files = result.TryGetProperty("files", out var many) ? many.EnumerateArray() :
-            result.TryGetProperty("file", out var one) ? new[] { one } : [];
-        if (files.Any(file => file.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null))
+        if (response.Envelope.GetProperty("issues").EnumerateArray().Any(issue =>
+                issue.GetProperty("scope").GetString() == "file" ||
+                issue.GetProperty("code").GetString() == "file_issues_truncated"))
             throw new InvalidOperationException("A partial per-file error cannot count as a speedup.");
     }
 

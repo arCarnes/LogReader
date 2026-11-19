@@ -28,7 +28,7 @@ internal static partial class McpWorkflowMeasurements
             }, ct);
             cursor = initial.Cursor;
             RejectIncompleteEnvelope(initial);
-            RejectFileErrors(initial.Result);
+            RejectFileErrors(initial);
             if (cursor == null || initial.Result.GetProperty("selectedFileCount").GetInt32() != files.Length)
                 throw new InvalidOperationException("Active baseline was incomplete.");
             for (var i = 0; i < files.Length; i++)
@@ -46,7 +46,7 @@ internal static partial class McpWorkflowMeasurements
                 progress.Add(GetProgress(result));
                 cursor = poll.Cursor;
                 RejectIncompleteEnvelope(poll);
-                RejectFileErrors(result);
+                RejectFileErrors(poll);
                 var batch = result.GetProperty("files").EnumerateArray().ToArray();
                 if (cursor == null || batch.Length != result.GetProperty("checkedFileCount").GetInt32() ||
                     result.GetProperty("backlogFileCount").GetInt32() != 0 || result.GetProperty("stoppedFileCount").GetInt32() != 0 ||

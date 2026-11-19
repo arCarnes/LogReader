@@ -46,7 +46,8 @@ internal static partial class CountTimeWindowResolver
         if (relativeWindow != null &&
             (!string.IsNullOrWhiteSpace(query.StartTimestamp) || !string.IsNullOrWhiteSpace(query.EndTimestamp)))
         {
-            error = Error("conflicting_time_window", "relativeWindow cannot be combined with startTimestamp or endTimestamp.");
+            error = Error("conflicting_time_window", "relativeWindow cannot be combined with startTimestamp or endTimestamp.")
+                with { ArgumentPath = "/relativeWindow" };
             return false;
         }
 
@@ -83,9 +84,9 @@ internal static partial class CountTimeWindowResolver
         {
             startTimestamp = Normalize(query.StartTimestamp);
             endTimestamp = Normalize(query.EndTimestamp);
-            if (!TimestampParser.TryBuildRange(startTimestamp, endTimestamp, out range, out _))
+            if (!TimestampParser.TryBuildRange(startTimestamp, endTimestamp, out range, out var rangeError))
             {
-                error = Error("invalid_timestamp_range", "The requested timestamp range is invalid.");
+                error = InvalidTimestampRange(startTimestamp, rangeError!);
                 return false;
             }
 
@@ -379,6 +380,14 @@ internal static partial class CountTimeWindowResolver
 
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    internal static ConfiguredLogRequestError InvalidTimestampRange(string? start, string message)
+    {
+        var path = !string.IsNullOrWhiteSpace(start) && !TimestampParser.TryParseInput(start, out _)
+            ? "/startTimestamp"
+            : "/endTimestamp";
+        return Error("invalid_timestamp_range", message) with { ArgumentPath = path };
+    }
 
     private static ConfiguredLogRequestError Error(string code, string message)
         => new(code, message);

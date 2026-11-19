@@ -375,18 +375,28 @@ public sealed partial class HeadlessLogQueryBackend
                 page.TruncationReasons.Add("query_hit_limit");
             }
             var nextCursor = traversalComplete || queryHitLimitReached ? null : transaction.NextCursor;
-            object result = count == null
+            var handoffCursor = (count?.EnableHandoff ?? search.EnableHandoff) && traversalComplete && CanHandoff(state)
+                ? transaction.NextCursor
+                : null;
+            object payload = count == null
                 ? BuildResumableSearch(requestId, catalog.Snapshot.Revision, state, page, search, nextCursor,
-                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline, search.EnableHandoff ? transaction.NextCursor : null)
+                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline, handoffCursor)
                 : BuildResumableCount(requestId, catalog.Snapshot.Revision, state, page, nextCursor,
-                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline, count.EnableHandoff ? transaction.NextCursor : null);
+                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline, handoffCursor);
+            var result = (LogOperationEnvelope<T>)payload with
+            {
+                FileOutcomes = LogFileOutcomes.Capture(TraversalFileIssues(state), traversalComplete &&
+                    state.Files.Count > 0 && state.Files.All(static file => file.Error != null && file.EvaluatedThroughLine == null),
+                    _limits.MaximumResponseCharacters)
+            };
             foreach (var file in page.Files.Keys.Where(static file => file.Done))
                 file.Reported = true;
             EnsureTraversalCapacity(state);
-            var bytes = state.RetainedBytes + JsonSerializer.SerializeToUtf8Bytes(result).LongLength * 3 + 4096;
+            var bytes = state.RetainedBytes + JsonSerializer.SerializeToUtf8Bytes(result).LongLength * 3 +
+                        result.FileOutcomes.RetainedBytes + 4096;
             transaction.Commit(state, result, bytes, traversalComplete || queryHitLimitReached,
-                retainTerminal: count?.EnableHandoff ?? search.EnableHandoff);
-            return (LogOperationEnvelope<T>)result;
+                retainTerminal: handoffCursor != null);
+            return result;
         }
         catch (ContinuationException ex)
         {
@@ -603,6 +613,29 @@ public sealed partial class HeadlessLogQueryBackend
 
     private static int RemainingFiles(QueryTraversal state)
         => state.RemainingCandidates + state.Files.Count(static file => !file.Done);
+
+    private static IEnumerable<ConfiguredLogRequestError> TraversalFileIssues(QueryTraversal state)
+    {
+        foreach (var file in state.Files)
+        {
+            if (file.Error is { } error)
+            {
+                yield return error;
+                continue;
+            }
+
+            if (file.Checkpoint.Reasons.Contains(ResumableLogScanner.FileGrewDuringScan))
+                yield return Error(ResumableLogScanner.FileGrewDuringScan,
+                    "The file grew during the scan and its captured bytes could not be verified. Report the observed evidence. Continue only with the supplied cursor.",
+                    targetId: file.File.FileId);
+            if (file.Checkpoint.Reasons.Contains("file_generation_unverified"))
+                yield return Error("file_generation_unverified", "The captured file identity could not be verified.",
+                    targetId: file.File.FileId);
+            if (file.Total.UnbucketedMatchingLineCount > 0)
+                yield return Error("timestamp_bucket_unassigned", "Some matching lines could not be assigned to a time bucket.",
+                    targetId: file.File.FileId);
+        }
+    }
 
     private static ImmutableArray<string> FileReasons(TraversalFile file)
     {
