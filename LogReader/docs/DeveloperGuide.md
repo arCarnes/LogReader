@@ -297,7 +297,7 @@ pwsh -NoProfile -File .\packaging\scripts\Test-McpStdioArtifact.ps1 -ExecutableP
 
 Before release, also run the full solution build/tests and `packaging\Publish-All.ps1`. Record executable, portable zip, MSI, default-UI startup/idle, and representative headless request measurements. Active MCP client processes must be stopped before installer replacement testing.
 
-For an MCP contract cutover, test the packaged server in fresh Codex and Claude Code sessions after restarting the MCP connection and refreshing tool discovery. Verify that each client discovers a configured file ID, supplies `targets` to `count_logs`, and finishes a search on a continuously appending fixture using the returned continuation without starting a second search. Record this separately from the direct stdio smoke, which checks the server's published schema and responses. See [MCP 2.0 cutover validation](McpV2CutoverValidation.md) for the fixture scenario and acceptance status.
+For an MCP contract cutover, test the packaged server in fresh Codex and Claude Code sessions after restarting the MCP connection and refreshing tool discovery. Verify that each client discovers a configured file ID, supplies `targets` to `count_logs`, and finishes a search on a continuously appending fixture using the returned continuation without starting a second search. Record this separately from the direct stdio smoke, which checks the server's published schema and responses.
 
 ## Application and launcher release workflow
 
