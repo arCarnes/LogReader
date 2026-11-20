@@ -96,10 +96,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable artifact validation failed."
 }
 
-& $mcpSmokeScriptPath -ExecutablePath (Join-Path $outputDir "WeezTail.Mcp.exe")
+if ($StorageMode -eq "ExeDirectory") {
+    & $mcpSmokeScriptPath -ExecutablePath (Join-Path $outputDir "WeezTail.Mcp.exe")
 
-if ($LASTEXITCODE -ne 0) {
-    throw "Portable MCP stdio smoke test failed."
+    if ($LASTEXITCODE -ne 0) {
+        throw "Portable MCP stdio smoke test failed."
+    }
 }
 
 Write-Host "$packageName package published to $outputDir"

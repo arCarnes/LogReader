@@ -3,6 +3,7 @@ namespace LogReader.Tests;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
+using Json.Schema;
 using LogReader.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -162,12 +163,37 @@ public sealed class McpStdioProtocolTests
         Assert.True(malformed.IsError);
         Assert.True(integerEnum.IsError);
         Assert.True(unknownArgument.IsError);
+        Assert.Equal(JsonValueKind.Null, unknownArgument.StructuredContent!.Value.GetProperty("data").ValueKind);
         Assert.True(overLimit.IsError);
         Assert.Contains(
             overLimit.StructuredContent!.Value.GetProperty("issues").EnumerateArray(),
             error => error.GetProperty("code").GetString() == "invalid_line_count");
         await Assert.ThrowsAnyAsync<McpException>(async () =>
             await client.CallToolAsync("unknown_tool", arguments: null, cancellationToken: cancellation.Token));
+    }
+
+    [Fact]
+    public async Task Executable_UnavailableCatalogReturnsReadinessDiagnostics()
+    {
+        await using var deployment = new Deployment();
+        File.WriteAllText(Path.Combine(deployment.Root, "Data", "logfiles.json"), "{");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var client = await deployment.CreateClientAsync("weeztail-unavailable-catalog-test", cancellation.Token);
+        var tools = await client.ListToolsAsync(cancellationToken: cancellation.Token);
+        var result = await client.CallToolAsync("server_status", arguments: null, cancellationToken: cancellation.Token);
+
+        Assert.True(result.IsError);
+        var body = result.StructuredContent!.Value;
+        Assert.Equal("error", body.GetProperty("status").GetString());
+        var readiness = body.GetProperty("data").GetProperty("queryBackend");
+        Assert.False(readiness.GetProperty("isReady").GetBoolean());
+        Assert.Equal("catalog_unavailable", readiness.GetProperty("connectionState").GetString());
+        Assert.Contains(body.GetProperty("issues").EnumerateArray(), issue =>
+            issue.GetProperty("code").GetString() == "recovery_required");
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("continuation").ValueKind);
+        Assert.Equal(body.GetRawText(), Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text);
+        var outputSchema = tools.Single(tool => tool.Name == "server_status").ProtocolTool.OutputSchema!.Value;
+        Assert.True(McpV2Response.CompileSchema(outputSchema).Evaluate(body).IsValid);
     }
 
     [Fact]
@@ -219,17 +245,7 @@ public sealed class McpStdioProtocolTests
     public async Task Executable_ExitsCleanlyWhenStdinClosesBeforeInitialize()
     {
         await using var deployment = new Deployment();
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = deployment.ExecutablePath,
-            WorkingDirectory = deployment.Root,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start the WeezTail MCP server.");
+        using var process = deployment.StartProcess();
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
 
@@ -242,6 +258,44 @@ public sealed class McpStdioProtocolTests
             Assert.Equal(0, process.ExitCode);
             Assert.Empty(await stdout);
             Assert.Empty(await stderr);
+        }
+        finally
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Theory]
+    [InlineData("{", "contain invalid or unsupported JSON")]
+    [InlineData("{\"mcpContinuationLimits\":{\"maximumSessions\":0}}", "are invalid: Enter positive whole numbers")]
+    [InlineData(null, "could not be read")]
+    public async Task Executable_FailedSettingsStartupExplainsTheFailureOnStderr(string? invalidSettings, string diagnostic)
+    {
+        await using var deployment = new Deployment();
+        var settingsPath = Path.Combine(deployment.Root, "Data", "settings.json");
+        if (invalidSettings is not null)
+            File.WriteAllText(settingsPath, invalidSettings);
+        using var settingsLock = invalidSettings is null
+            ? new FileStream(settingsPath, FileMode.Open, FileAccess.Read, FileShare.None)
+            : null;
+        using var process = deployment.StartProcess();
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+
+        try
+        {
+            // Keep stdin open so exit is attributable to the startup failure.
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await process.WaitForExitAsync(cancellation.Token);
+
+            Assert.Equal(1, process.ExitCode);
+            Assert.Empty(await stdout.WaitAsync(cancellation.Token));
+            var error = await stderr.WaitAsync(cancellation.Token);
+            Assert.Contains($"WeezTail MCP settings {diagnostic}", error, StringComparison.Ordinal);
+            Assert.DoesNotContain(settingsPath, error, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -417,6 +471,16 @@ public sealed class McpStdioProtocolTests
 
         private static void WriteStore<T>(string path, T data)
             => File.WriteAllText(path, JsonSerializer.Serialize(new { schemaVersion = 1, data }));
+
+        public Process StartProcess() => Process.Start(new ProcessStartInfo(ExecutablePath)
+        {
+            WorkingDirectory = Root,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        }) ?? throw new InvalidOperationException("Could not start the WeezTail MCP server.");
 
         public async Task<McpClient> CreateClientAsync(string name, CancellationToken ct, Action<string>? standardErrorLines = null)
         {

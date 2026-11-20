@@ -32,9 +32,14 @@ public static class McpStdioHost
                 Console.Error.WriteLine($"WeezTail MCP settings are invalid: {ex.Message} Correct them in the desktop app.");
                 return 1;
             }
-            catch (Exception ex) when (ex is System.IO.IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+            catch (System.Text.Json.JsonException)
             {
-                Console.Error.WriteLine("WeezTail MCP settings could not be loaded. Check the saved settings in the desktop app.");
+                Console.Error.WriteLine("WeezTail MCP settings contain invalid or unsupported JSON. Repair the saved settings in the desktop app.");
+                return 1;
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine("WeezTail MCP settings could not be read. Check file access for the Windows user running MCP.");
                 return 1;
             }
             using var backend = new OwnedHeadlessLogQueryBackend(limits);

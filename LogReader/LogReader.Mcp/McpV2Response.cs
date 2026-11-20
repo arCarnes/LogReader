@@ -66,8 +66,10 @@ internal static class McpV2Response
         }
         var continuationTool = typeof(T) == typeof(LogSearchResult) ? "continue_log_search"
             : typeof(T) == typeof(LogCountResult) ? "continue_log_count" : "poll_log_monitor";
+        // A failed readiness check can still explain why the server is unavailable.
+        var retainData = !wholeFailure || typeof(T) == typeof(McpLogServerStatus);
         return Serialize(new(SchemaVersion, response.RequestId, response.CatalogRevision, status,
-            wholeFailure ? null : data, issues.Distinct().ToArray(), !wholeFailure && next != null ? new(continuationTool, next) : null));
+            retainData ? data : null, issues.Distinct().ToArray(), !wholeFailure && next != null ? new(continuationTool, next) : null));
     }
 
     private static bool AddFileIssues(JsonNode? data, string? next, List<McpIssue> issues)
@@ -155,7 +157,9 @@ internal static class McpV2Response
         var root = JsonNode.Parse(shared.GetRawText())!.AsObject();
         var data = root["properties"]!["result"]!.DeepClone();
         NormalizeSchema(data);
-        data["description"] = "Operation data. scanComplete requires evaluation of captured extents with verifiable file contents. Null on rejection or wholly unevaluable scope.";
+        data["description"] = typeof(T) == typeof(McpLogServerStatus)
+            ? "Server readiness and diagnostics, including when the catalog check reports an error. Null when no readiness result is available."
+            : "Operation data. scanComplete requires evaluation of captured extents with verifiable file contents. Null on rejection or wholly unevaluable scope.";
         data["properties"]!["isTruncated"] = new JsonObject { ["type"] = "boolean" };
         data["properties"]!["truncationReasons"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } };
         var schema = JsonNode.Parse("""

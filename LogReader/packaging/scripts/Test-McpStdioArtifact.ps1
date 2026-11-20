@@ -71,11 +71,16 @@ $startInfo.CreateNoWindow = $true
 
 $process = New-Object System.Diagnostics.Process
 $process.StartInfo = $startInfo
+$started = $false
+$failed = $false
+$standardError = $null
 
 try {
-    if (-not $process.Start()) {
+    $started = $process.Start()
+    if (-not $started) {
         throw "Could not start the published WeezTail MCP executable."
     }
+    $standardError = $process.StandardError.ReadToEndAsync()
 
     Send-McpMessage $process '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"weeztail-packaging-smoke","version":"1.0"}}}'
     $initialize = Read-McpResponse $process 1 $TimeoutMilliseconds
@@ -112,7 +117,7 @@ try {
         }
     }
     $cases = @(
-        @{ name = 'server_status'; arguments = @{}; status = 'success' },
+        @{ name = 'server_status'; arguments = @{}; status = 'success'; requireReady = $true },
         @{ name = 'count_logs'; arguments = @{ targets = @(@{ kind = 'logFile'; id = 'packaging-smoke-missing' }); query = 'needle' }; status = 'error' },
         @{ name = 'start_log_monitor'; arguments = @{ targets = @(@{ kind = 'logFile'; id = 'packaging-smoke-missing' }) }; status = 'error' },
         @{ name = 'count_logs'; arguments = @{ query = 'needle' }; status = 'error'; path = '/targets' },
@@ -125,8 +130,10 @@ try {
         $sample = Read-McpResponse $process $requestId $TimeoutMilliseconds
         $body = $sample.result.structuredContent
         if ($body.schemaVersion -ne 5 -or $body.status -ne $case.status -or
-            $sample.result.isError -ne ($case.status -eq 'error')) {
-            throw "MCP $($case.name) returned an inconsistent outcome."
+            $sample.result.isError -ne ($case.status -eq 'error') -or
+            ($case.requireReady -and $body.data.queryBackend.isReady -ne $true)) {
+            $issueCodes = $body.issues.code -join ', '
+            throw "MCP $($case.name) returned an unexpected outcome (status=$($body.status), isReady=$($body.data.queryBackend.isReady), connectionState=$($body.data.queryBackend.connectionState), issues=[$issueCodes])."
         }
         if ($case.path -and $body.issues.argumentPath -notcontains $case.path) {
             throw "MCP $($case.name) did not explain its invalid argument."
@@ -160,11 +167,38 @@ try {
 
     Write-Host "MCP stdio artifact smoke test passed: $resolvedExecutablePath"
 }
+catch {
+    $failed = $true
+    throw
+}
 finally {
-    if (-not $process.HasExited) {
-        $process.Kill()
-        $process.WaitForExit()
+    try {
+        if ($started) {
+            if (-not $process.HasExited) {
+                $process.Kill()
+                if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+                    throw 'MCP smoke process did not exit after termination.'
+                }
+            }
+            elseif ($failed -and $process.ExitCode -ne 0) {
+                Write-Warning "MCP smoke process exited with code $($process.ExitCode)." -WarningAction Continue
+            }
+            if ($failed -and $null -ne $standardError -and $standardError.Wait($TimeoutMilliseconds)) {
+                $diagnostic = $standardError.Result.Trim()
+                if ($diagnostic.Length -gt 2048) {
+                    $diagnostic = '...' + $diagnostic.Substring($diagnostic.Length - 2048)
+                }
+                if ($diagnostic) {
+                    Write-Warning "MCP stderr: $diagnostic" -WarningAction Continue
+                }
+            }
+        }
     }
-
-    $process.Dispose()
+    catch {
+        if (-not $failed) { throw }
+        Write-Warning 'MCP smoke cleanup or diagnostic capture failed.' -WarningAction Continue
+    }
+    finally {
+        $process.Dispose()
+    }
 }

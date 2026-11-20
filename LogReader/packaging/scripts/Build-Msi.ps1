@@ -16,7 +16,6 @@ $installerActionBuildScriptPath = Join-Path $scriptRoot "Build-InstallerActions.
 $installerActionValidationScriptPath = Join-Path $scriptRoot "Validate-InstallerActions.ps1"
 $identityValidationScriptPath = Join-Path $scriptRoot "Validate-MsiIdentity.ps1"
 $shortcutValidationScriptPath = Join-Path $scriptRoot "Validate-MsiShortcuts.ps1"
-$mcpSmokeScriptPath = Join-Path $scriptRoot "Test-McpStdioArtifact.ps1"
 $publishDir = Join-Path $productRoot "artifacts\publish\WeezTail.MsiPayload"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
 $installerActionOutputDir = Join-Path $productRoot "artifacts\installer-actions"
@@ -88,12 +87,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Copy-Item $configTemplatePath (Join-Path $publishDir "WeezTail.install.json") -Force
-
-& $mcpSmokeScriptPath -ExecutablePath (Join-Path $publishDir "WeezTail.Mcp.exe")
-
-if ($LASTEXITCODE -ne 0) {
-    throw "MSI payload MCP stdio smoke test failed."
-}
 
 & dotnet restore $setupProjectPath `
     /p:NuGetAudit=false

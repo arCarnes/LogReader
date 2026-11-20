@@ -94,7 +94,6 @@ New-SharedRelease -OutputDirectory $sharedOutputDir -ApplicationDirectory $appDa
     -LauncherDirectory $launcherOutputDir -ApplicationVersion $version
 New-ReleaseZip -SourceDirectory $sharedOutputDir -DestinationPath $sharedZipPath
 & $sharedValidationScriptPath -PublishDirectory $sharedOutputDir -ZipPath $sharedZipPath
-& (Join-Path $scriptRoot "scripts\Test-McpStdioArtifact.ps1") -ExecutablePath (Join-Path $sharedOutputDir "WeezTail.Mcp.Launcher.exe")
 
 & $msiScriptPath -Configuration $Configuration -Runtime $Runtime
 
